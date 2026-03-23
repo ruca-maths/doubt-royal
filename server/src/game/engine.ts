@@ -305,8 +305,19 @@ export class GameEngine {
         
         // Turn moves to counterer
         room.currentPlayerIndex = room.turnOrder.indexOf(result.countererId);
-        
-        room.phase = 'playing';
+
+        // Phase 12: If doubt was attempted and failed, allow counter-player to give cards
+        if (result.doubterId) {
+          room.pendingEffect = {
+            type: 'doubtCardSelect',
+            playerId: result.countererId,
+            count: result.count,
+            targetPlayerId: result.doubterId,
+          };
+          room.phase = 'effectPhase';
+        } else {
+          room.phase = 'playing';
+        }
         return;
       }
 
@@ -330,8 +341,19 @@ export class GameEngine {
       if (countererIdx !== -1) {
         room.currentPlayerIndex = countererIdx;
       }
-      
-      room.phase = 'playing';
+
+      // Phase 12: If doubt was attempted and failed, allow counter-player to give cards
+      if (result.doubterId) {
+        room.pendingEffect = {
+          type: 'doubtCardSelect',
+          playerId: result.countererId,
+          count: result.count,
+          targetPlayerId: result.doubterId,
+        };
+        room.phase = 'effectPhase';
+      } else {
+        room.phase = 'playing';
+      }
       return;
     } else if (result.type === 'success') {
       GameEngine.addLog(room, 'doubtSuccess', result.doubterId, { revealedCards: result.revealedCards });
