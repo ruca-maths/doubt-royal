@@ -1,0 +1,120 @@
+import { Card, Room, PendingEffect } from './types';
+
+/**
+ * Apply card effects after cards are played.
+ * Phase B: 8-cut, 9-reverse, revolution
+ * Phase C: all other effects
+ */
+export function applyCardEffect(
+  room: Room,
+  playedCards: Card[],
+  declaredNumber: number,
+  playerId: string
+): { shouldClearField: boolean; pendingEffect: PendingEffect | null; skipDoubt: boolean } {
+  let shouldClearField = false;
+  let pendingEffect: PendingEffect | null = null;
+  let skipDoubt = false;
+
+  // Revolution: 4+ cards of same number
+  if (playedCards.length >= 4) {
+    room.rules.isRevolution = !room.rules.isRevolution;
+  }
+
+  switch (declaredNumber) {
+    case 8:
+      // 8切り: normally clears field, but we allow doubt/counter phase
+      shouldClearField = true;
+      skipDoubt = false; // Allow a window for "4-counter"
+      break;
+
+    case 9:
+      // 9リバース: reverse direction
+      room.rules.direction = (room.rules.direction === 1 ? -1 : 1) as 1 | -1;
+      break;
+
+    case 5:
+      // 5スキ: skip next N players
+      applySkip(room, playerId, playedCards.length);
+      break;
+
+    case 11:
+      // 11バック: enable eleven-back until field is cleared
+      room.rules.isElevenBack = true;
+      break;
+
+    case 7:
+      // 7渡し: player must pass N cards to next player
+      pendingEffect = {
+        type: 'sevenPass',
+        playerId: playerId,
+        count: playedCards.length,
+      };
+      break;
+
+    case 6:
+      // 回収: player collects N cards from faceUpPool (Face-up Grave)
+      if (room.field.faceUpPool.length > 0) {
+        pendingEffect = {
+          type: 'sixCollect',
+          playerId: playerId,
+          count: Math.min(playedCards.length, room.field.faceUpPool.length),
+        };
+      }
+      break;
+
+    case 10:
+      // 10捨て札: player chooses cards to discard (can be doubted)
+      pendingEffect = {
+        type: 'tenDiscard',
+        playerId: playerId,
+        count: playedCards.length,
+      };
+      break;
+
+    case 12:
+      // Qボンバー: specify N numbers
+      pendingEffect = {
+        type: 'queenBomber',
+        playerId: playerId,
+        count: playedCards.length,
+      };
+      break;
+  }
+
+  return { shouldClearField, pendingEffect, skipDoubt };
+}
+
+function applySkip(room: Room, playerId: string, count: number): void {
+  const playerIdx = room.turnOrder.indexOf(playerId);
+  const dir = room.rules.direction;
+  const total = room.turnOrder.length;
+
+  for (let i = 1; i <= count; i++) {
+    const skipIdx = ((playerIdx + dir * i) % total + total) % total;
+    const skipPlayerId = room.turnOrder[skipIdx];
+    const player = room.players.find(p => p.id === skipPlayerId);
+    if (player && !player.isOut) {
+      player.isSkipped = true;
+    }
+  }
+}
+
+/**
+ * Clear field and reset eleven-back.
+ * Cards go to cardHistory (Regular Grave) because they were not doubted.
+ */
+export function clearField(room: Room): void {
+  // Move current cards and history to Regular Grave
+  room.field.cardHistory.push(...room.field.currentCards);
+
+  room.field.currentCards = [];
+  room.field.declaredNumber = 0;
+  room.field.lastPlayerId = null;
+  room.field.doubtType = null;
+
+  // Reset eleven-back when field is cleared
+  room.rules.isElevenBack = false;
+
+  // Reset skip flags
+  room.players.forEach(p => { p.isSkipped = false; });
+}

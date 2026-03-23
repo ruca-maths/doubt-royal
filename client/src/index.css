@@ -1,0 +1,168 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --card-width: 80px;
+  --card-height: 120px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: #0a0e1a;
+  color: #e2e8f0;
+  min-height: 100vh;
+}
+
+/* ===== Background Pattern ===== */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(139, 92, 246, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 80%, rgba(59, 130, 246, 0.05) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}
+
+/* ===== Card Styles ===== */
+.card-container {
+  width: var(--card-width);
+  height: var(--card-height);
+  perspective: 500px;
+  cursor: pointer;
+  transition: transform 0.2s ease, margin-top 0.2s ease;
+}
+
+.card-container:hover {
+  transform: translateY(-8px);
+}
+
+.card-container.selected {
+  transform: translateY(-20px);
+}
+
+.card-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  position: relative;
+  transform-style: preserve-3d;
+}
+
+.card-face {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  background: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%);
+  border: 2px solid #cbd5e1;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.card-face.heart, .card-face.diamond {
+  color: #dc2626;
+}
+
+.card-face.spade, .card-face.club {
+  color: #1e293b;
+}
+
+.card-face.joker {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6, #ec4899);
+  color: white;
+  border-color: #6366f1;
+}
+
+.card-back {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #312e81, #4338ca, #6366f1);
+  border: 2px solid #6366f1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.card-back::after {
+  content: '🃏';
+  font-size: 24px;
+  opacity: 0.5;
+}
+
+/* ===== Glassmorphism ===== */
+.glass {
+  background: rgba(17, 24, 39, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+}
+
+.glass-light {
+  background: rgba(30, 41, 59, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(99, 102, 241, 0.1);
+}
+
+/* ===== Progress Bar ===== */
+.doubt-timer-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #6366f1, #ec4899);
+  transition: width 0.1s linear;
+}
+
+/* ===== Glow Effects ===== */
+.glow-accent {
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.3),
+              0 0 60px rgba(99, 102, 241, 0.1);
+}
+
+.glow-danger {
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.3),
+              0 0 60px rgba(239, 68, 68, 0.1);
+}
+
+.glow-gold {
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.3),
+              0 0 60px rgba(245, 158, 11, 0.1);
+}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.5);
+}
