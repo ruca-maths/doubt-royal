@@ -173,7 +173,7 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
         </div>
 
         {/* Buttons */}
-        {isCounterPhase ? (
+        {gameState.pendingEffect?.playerId === myId ? null : isCounterPhase ? (
           gameState.counterActorId === myId && !hasActed ? (
             <div className="space-y-3">
               <button
