@@ -44,6 +44,11 @@ export default function Lobby() {
               プレイヤー ({roomInfo.players.length}/6)
             </h3>
             <div className="space-y-2">
+              {roomInfo.players.length === 0 && (
+                <div className="text-center py-4 text-gray-500 italic bg-white/5 rounded-xl">
+                  プレイヤーを読み込み中、または取得できません...
+                </div>
+              )}
               {roomInfo.players.map((p, i) => (
                 <div
                   key={p.id}
@@ -199,12 +204,14 @@ export default function Lobby() {
           <div className="mt-8 pt-6 border-t border-white/5 text-center">
             <button
               onClick={() => {
-                sessionStorage.clear();
+                localStorage.removeItem('playerName');
+                localStorage.removeItem('roomId');
+                localStorage.removeItem('persistentId');
                 window.location.reload();
               }}
               className="text-xs text-gray-700 hover:text-gray-400 transition-colors uppercase tracking-widest font-bold"
             >
-              初期状態に戻す (セッションのリセット)
+              初期状態に戻す (データのリセット)
             </button>
           </div>
         </div>

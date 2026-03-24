@@ -92,7 +92,10 @@ export function getValidDeclarations(currentNum: number, currentCardCount: numbe
   const allNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 0];
   
   // If field is empty, any number is valid
-  if (currentCardCount === 0 || currentNum === 0) return allNumbers;
+  if (currentCardCount === 0) return allNumbers;
+  
+  // If a Joker was declared (and not in counter phase), nothing beats it
+  if (currentNum === 0) return [];
 
   const currentStrength = getStrength(currentNum, isReversed);
 

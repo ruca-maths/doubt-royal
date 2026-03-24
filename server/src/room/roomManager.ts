@@ -4,8 +4,15 @@ import { v4 as uuidv4 } from 'uuid';
 const rooms = new Map<string, Room>();
 
 export class RoomManager {
-  static createRoom(hostId: string, hostName: string): Room {
-    const roomId = uuidv4().slice(0, 6).toUpperCase();
+  static createRoom(hostId: string, hostName: string, persistentId: string): Room {
+    let roomId = '';
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Avoid ambiguous chars
+    do {
+      roomId = '';
+      for (let i = 0; i < 6; i++) {
+        roomId += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+    } while (rooms.has(roomId));
 
     const host: Player = {
       id: hostId,
@@ -15,7 +22,7 @@ export class RoomManager {
       rank: null,
       isSkipped: false,
       isOut: false,
-      persistentId: hostId, // Use hostId as default persistentId for host if not provided
+      persistentId,
       rankStats: {},
     };
 
@@ -59,8 +66,8 @@ export class RoomManager {
     const room = rooms.get(roomId);
     if (!room) return { error: 'ルームが見つかりません' };
 
-    // Check for rejoin first
-    const existingPlayer = room.players.find(p => p.persistentId === persistentId);
+    // Check for rejoin first (both persistentId and playerName must match)
+    const existingPlayer = room.players.find(p => p.persistentId === persistentId && p.name === playerName);
     if (existingPlayer) {
       const oldId = existingPlayer.id;
       return { room, isRejoin: true, oldId };

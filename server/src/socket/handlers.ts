@@ -9,14 +9,17 @@ export function registerHandlers(io: Server): void {
 
     // ===== LOBBY =====
 
-    socket.on('create-room', (data: { playerName: string }, callback) => {
-      const room = RoomManager.createRoom(socket.id, data.playerName);
+    socket.on('create-room', (data: { playerName: string; persistentId: string }, callback) => {
+      const room = RoomManager.createRoom(socket.id, data.playerName, data.persistentId);
       socket.join(room.id);
-      callback({ success: true, roomId: room.id });
-      io.to(room.id).emit('room-update', {
+      
+      const payload = {
         players: room.players.map(p => ({ id: p.id, name: p.name })),
         hostId: room.hostId,
-      });
+      };
+      
+      callback({ success: true, roomId: room.id, roomInfo: payload });
+      io.to(room.id).emit('room-update', payload);
     });
 
     socket.on('join-room', (data: { roomId: string; playerName: string; persistentId: string }, callback) => {
@@ -30,22 +33,26 @@ export function registerHandlers(io: Server): void {
       socket.join(data.roomId);
 
       if (result.isRejoin && result.oldId) {
-        console.log(`Reassigning player ID from ${result.oldId} to ${socket.id}`);
         GameEngine.reassignPlayerId(room, result.oldId, socket.id);
         
-        callback({ success: true, roomId: data.roomId, isRejoin: true });
+        const updatedPayload = {
+          players: room.players.map(p => ({ id: p.id, name: p.name })),
+          hostId: room.hostId,
+        };
+        callback({ success: true, roomId: data.roomId, isRejoin: true, roomInfo: updatedPayload });
         
-        // Give the rejoined player the current game state immediately
         const state = GameEngine.getClientState(room, socket.id);
         socket.emit('game-state', state);
-      } else {
-        callback({ success: true, roomId: data.roomId });
-      }
 
-      io.to(data.roomId).emit('room-update', {
-        players: room.players.map(p => ({ id: p.id, name: p.name })),
-        hostId: room.hostId,
-      });
+        io.to(data.roomId).emit('room-update', updatedPayload);
+      } else {
+        const payload = {
+          players: room.players.map(p => ({ id: p.id, name: p.name })),
+          hostId: room.hostId,
+        };
+        callback({ success: true, roomId: data.roomId, roomInfo: payload });
+        io.to(data.roomId).emit('room-update', payload);
+      }
     });
 
     socket.on('leave-room', () => {

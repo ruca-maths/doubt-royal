@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Card as CardType } from '../types/game';
 import Card from './Card';
 import { sortCards } from '../utils/cardUtils';

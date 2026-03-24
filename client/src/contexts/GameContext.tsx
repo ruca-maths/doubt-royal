@@ -49,8 +49,8 @@ interface GameProviderProps {
 }
 
 export function GameProvider({ children, socket, isConnected }: GameProviderProps) {
-  const [playerName, setPlayerName] = useState(() => sessionStorage.getItem('playerName') || '');
-  const [roomId, setRoomId] = useState<string | null>(() => sessionStorage.getItem('roomId') || null);
+  const [playerName, setPlayerName] = useState(() => localStorage.getItem('playerName') || '');
+  const [roomId, setRoomId] = useState<string | null>(() => localStorage.getItem('roomId') || null);
   const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(null);
   const [gameState, setGameState] = useState<ClientGameState | null>(null);
   const [doubtResult, setDoubtResult] = useState<DoubtResult | null>(null);
@@ -58,24 +58,24 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
   const myId = socket?.id || null;
 
   const [persistentId] = useState(() => {
-    let id = sessionStorage.getItem('persistentId');
+    let id = localStorage.getItem('persistentId');
     if (!id) {
       id = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-      sessionStorage.setItem('persistentId', id);
+      localStorage.setItem('persistentId', id);
     }
     return id;
   });
 
-  // Sync playerName and roomId to sessionStorage
+  // Sync playerName and roomId to localStorage
   useEffect(() => {
-    sessionStorage.setItem('playerName', playerName);
+    localStorage.setItem('playerName', playerName);
   }, [playerName]);
 
   useEffect(() => {
     if (roomId) {
-      sessionStorage.setItem('roomId', roomId);
+      localStorage.setItem('roomId', roomId);
     } else {
-      sessionStorage.removeItem('roomId');
+      localStorage.removeItem('roomId');
     }
   }, [roomId]);
 
@@ -83,6 +83,7 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
     if (!socket) return;
 
     socket.on('room-update', (data: RoomInfo) => {
+      console.log('[DEBUG] room-update received:', JSON.stringify(data, null, 2));
       setRoomInfo(data);
     });
 
@@ -126,7 +127,9 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
       playerName: playerName.trim(),
       persistentId 
     }, (res: any) => {
+      console.log('[DEBUG] create-room callback:', res);
       if (res.success) {
+        if (res.roomInfo) setRoomInfo(res.roomInfo);
         setRoomId(res.roomId);
         setError(null);
       } else {
@@ -142,7 +145,9 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
       playerName: playerName.trim(),
       persistentId
     }, (res: any) => {
+      console.log('[DEBUG] join-room callback:', res);
       if (res.success) {
+        if (res.roomInfo) setRoomInfo(res.roomInfo);
         setRoomId(res.roomId);
         setError(null);
       } else {
@@ -153,11 +158,19 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
 
   // Handle auto-rejoin on refresh
   useEffect(() => {
-    if (isConnected && socket && roomId && playerName && !roomInfo) {
+    if (isConnected && socket && roomId && playerName && !roomInfo && !error) {
       console.log('Attempting auto-rejoin to', roomId);
       joinRoom(roomId);
     }
-  }, [isConnected, socket, roomId, playerName, roomInfo, joinRoom]);
+  }, [isConnected, socket, roomId, playerName, roomInfo, joinRoom, error]);
+
+  // If room not found during rejoin, clear roomId
+  useEffect(() => {
+    if (error === 'ルームが見つかりません' && roomId) {
+      setRoomId(null);
+      setRoomInfo(null);
+    }
+  }, [error, roomId]);
 
   const leaveRoom = useCallback(() => {
     if (!socket) return;

@@ -183,10 +183,8 @@ export class DoubtManager {
       };
     } else {
       // Doubt FAILURE: the player was honest
-      // ALL cards revealed by doubt go to face-up pool
-      room.field.faceUpPool.push(...room.field.currentCards);
+      // The cards remain in currentCards so the game continues requiring this strength.
       const revealedCards = [...room.field.currentCards];
-      room.field.currentCards = [];
 
       // Penalty: Doubter (loser) loses a life. (Card history is no longer picked up).
       doubter.lives -= 1;
