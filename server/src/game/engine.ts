@@ -295,6 +295,7 @@ export class GameEngine {
         room.field.declaredNumber = 0;
         room.field.lastPlayerId = null;
         room.field.doubtType = null;
+        room.field.hasFieldCleared = true;
         room.rules.isElevenBack = false;
         room.players.forEach(p => { p.isSkipped = false; });
         
@@ -328,6 +329,7 @@ export class GameEngine {
       room.field.declaredNumber = 0;
       room.field.lastPlayerId = null;
       room.field.doubtType = null;
+      room.field.hasFieldCleared = true;
       room.rules.isElevenBack = false;
       room.players.forEach(p => { p.isSkipped = false; });
       
@@ -379,6 +381,12 @@ export class GameEngine {
         // Phase 4: Q-Bomber lied -> Do NOT destroy cards
         if (room.rollbackState.declaredNumber === 12) {
           room.field.pendingNumbers = undefined;
+        }
+
+        // If the rollback made the field empty (e.g., lied on the very first play),
+        // we consider the field 'cleared' for Q-Bomber purposes.
+        if (room.field.currentCards.length === 0) {
+          room.field.hasFieldCleared = true;
         }
       }
 
