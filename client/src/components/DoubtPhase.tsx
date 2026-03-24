@@ -170,9 +170,33 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
         </div>
 
         {/* Buttons */}
-        {!isMyCards && !hasActed ? (
-          <div className="space-y-3">
-            {!isCounterPhase && (
+        {isCounterPhase ? (
+          gameState.counterActorId === myId && !hasActed ? (
+            <div className="space-y-3">
+              <button
+                onClick={handleSkip}
+                className="w-full py-3 rounded-xl bg-game-card hover:bg-game-border text-gray-400 hover:text-white font-medium transition-all"
+              >
+                スルー（カウンターしない）
+              </button>
+            </div>
+          ) : isMyCards ? (
+            <div className="py-5 text-gray-500 text-lg">
+              相手のカウンター判定を待っています...
+            </div>
+          ) : gameState.counterActorId === myId && hasActed ? (
+             <div className="py-5 text-game-accent-light text-lg font-semibold animate-pulse">
+               ✅ 宣言済み
+             </div>
+          ) : (
+            <div className="py-5 text-gray-400 text-sm">
+              {gameState.players.find(p => p.id === gameState.counterActorId)?.name || '他のプレイヤー'} の判断を待機中...
+            </div>
+          )
+        ) : (
+          /* Normal doubt logic */
+          !isMyCards && !hasActed ? (
+            <div className="space-y-3">
               <button
                 onClick={handleDoubt}
                 className="w-full py-5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-500 text-white text-2xl font-black
@@ -182,25 +206,22 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
               >
                 ダウト！
               </button>
-            )}
-            <button
-              onClick={handleSkip}
-              className="w-full py-3 rounded-xl bg-game-card hover:bg-game-border text-gray-400 hover:text-white font-medium transition-all"
-            >
-              {isCounterPhase ? 'スルー（カウンターしない）' : 'スルー（ダウトしない）'}
-            </button>
-            
-            {/* Logic for manual counter moved to GameBoard.tsx, so we can remove it from here if we want or keep as shortcut for auto-selection */}
-            {/* But since we need multiple card selection for N+1 cards, manual selection in GameBoard is better. */}
-          </div>
-        ) : isMyCards ? (
-          <div className="py-5 text-gray-500 text-lg">
-            相手の{isCounterPhase ? 'カウンター' : 'ダウト'}判定を待っています...
-          </div>
-        ) : (
-          <div className="py-5 text-game-accent-light text-lg font-semibold animate-pulse">
-            ✅ 宣言済み
-          </div>
+              <button
+                onClick={handleSkip}
+                className="w-full py-3 rounded-xl bg-game-card hover:bg-game-border text-gray-400 hover:text-white font-medium transition-all"
+              >
+                スルー（ダウトしない）
+              </button>
+            </div>
+          ) : isMyCards ? (
+            <div className="py-5 text-gray-500 text-lg">
+              相手のダウト判定を待っています...
+            </div>
+          ) : (
+            <div className="py-5 text-game-accent-light text-lg font-semibold animate-pulse">
+              ✅ 宣言済み
+            </div>
+          )
         )}
       </div>
     </div>

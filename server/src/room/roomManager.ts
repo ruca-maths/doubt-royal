@@ -57,6 +57,7 @@ export class RoomManager {
       doubtTimerId: null,
       logs: [],
       pendingFinishPlayerId: null,
+      counterActorIndex: null,
     };
 
     rooms.set(roomId, room);
@@ -67,9 +68,14 @@ export class RoomManager {
     const room = rooms.get(roomId);
     if (!room) return { error: 'ルームが見つかりません' };
 
-    // Check for rejoin first (both persistentId and playerName must match)
-    const existingPlayer = room.players.find(p => p.persistentId === persistentId && p.name === playerName);
+    // Check for rejoin first (persistentId is the unique identifier for a session)
+    // We do NOT require playerName to match, in case they re-entered a different name
+    // but have the same session. This prevents creating duplicate 'phantom' players.
+    const existingPlayer = room.players.find(p => p.persistentId === persistentId);
     if (existingPlayer) {
+      if (existingPlayer.name !== playerName && playerName.trim() !== '') {
+        existingPlayer.name = playerName.trim(); // Update to new name if provided
+      }
       const oldId = existingPlayer.id;
       return { room, isRejoin: true, oldId };
     }

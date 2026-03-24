@@ -161,15 +161,25 @@ export function registerHandlers(io: Server): void {
       if (!room) { callback?.({ success: false, error: 'ルームが見つかりません' }); return; }
       if (room.phase !== 'doubtPhase' && room.phase !== 'counterPhase') { callback?.({ success: false, error: 'スキップ可能なフェーズではありません' }); return; }
 
+      if (room.phase === 'counterPhase') {
+        const counterActorId = room.counterActorIndex !== null ? room.turnOrder[room.counterActorIndex] : null;
+        if (socket.id !== counterActorId) { callback?.({ success: false, error: 'あなたの順番ではありません' }); return; }
+        
+        callback?.({ success: true });
+        const hasNext = GameEngine.advanceCounterActor(room);
+        if (hasNext) {
+          startCounterTimer(io, room);
+        } else {
+          resolveAndBroadcastCounter(io, room);
+        }
+        return;
+      }
+
       const isAllResolved = DoubtManager.registerSkip(room, socket.id);
       callback?.({ success: true });
 
       if (isAllResolved) {
-        if (room.phase === 'doubtPhase') {
-          resolveAndBroadcastDoubt(io, room);
-        } else {
-          resolveAndBroadcastCounter(io, room);
-        }
+        resolveAndBroadcastDoubt(io, room);
       }
     });
 
@@ -177,6 +187,11 @@ export function registerHandlers(io: Server): void {
       const room = RoomManager.getRoomByPlayerId(socket.id);
       if (!room) { callback?.({ success: false, error: 'ルームが見つかりません' }); return; }
       if (room.phase !== 'doubtPhase' && room.phase !== 'counterPhase') { callback?.({ success: false, error: '現在はカウンターできません' }); return; }
+      
+      if (room.phase === 'counterPhase') {
+        const counterActorId = room.counterActorIndex !== null ? room.turnOrder[room.counterActorIndex] : null;
+        if (socket.id !== counterActorId) { callback?.({ success: false, error: 'あなたの順番ではありません' }); return; }
+      }
       
       const result = GameEngine.declareCounter(room, socket.id, data.cardIds);
       if (!result.success) {
@@ -348,7 +363,13 @@ function startDoubtTimer(io: Server, room: import('../game/types').Room): void {
 function startCounterTimer(io: Server, room: import('../game/types').Room): void {
   // Use same mechanism as doubt phase for simplicity, same duration
   DoubtManager.startDoubtPhase(room, (r) => {
-    resolveAndBroadcastCounter(io, r);
+    // If timer expires, act as if the current actor skipped
+    const hasNext = GameEngine.advanceCounterActor(r);
+    if (hasNext) {
+      startCounterTimer(io, r);
+    } else {
+      resolveAndBroadcastCounter(io, r);
+    }
   });
   room.phase = 'counterPhase'; // Override back to counterPhase
   

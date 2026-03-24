@@ -230,7 +230,7 @@ export default function GameBoard() {
             </div>
           )}
 
-          {gameState.phase === 'counterPhase' && gameState.field.lastPlayerId !== myId && (
+          {gameState.phase === 'counterPhase' && gameState.counterActorId === myId && (
             <button
                onClick={handleDeclareCounter}
                disabled={selectedCardIds.length === 0}

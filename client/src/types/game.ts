@@ -89,6 +89,7 @@ export interface ClientGameState {
   pendingEffect: PendingEffect | null;
   finishOrder: string[];
   logs: LogEntry[];
+  counterActorId: string | null;
 }
 
 export interface RoomInfo {

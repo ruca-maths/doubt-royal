@@ -582,6 +582,42 @@ export class GameEngine {
     room.doubtDeclarers = [];
     room.doubtSkippers = [];
     room.field.counteredBy = null;
+
+    // Start with the player immediately after the one who played the 8 or Joker
+    const lastPlayerIdx = room.turnOrder.indexOf(room.field.lastPlayerId!);
+    room.counterActorIndex = lastPlayerIdx;
+    GameEngine.advanceCounterActor(room);
+  }
+
+  /**
+   * Advance the counter actor to the next eligible player.
+   * Returns true if there is a next player, false if it looped back to the original player (end of counter phase).
+   */
+  static advanceCounterActor(room: Room): boolean {
+    if (room.counterActorIndex === null) return false;
+
+    const total = room.turnOrder.length;
+    let attempts = 0;
+
+    do {
+      room.counterActorIndex = ((room.counterActorIndex + room.rules.direction) % total + total) % total;
+      attempts++;
+      if (attempts > total) return false;
+
+      const nextPlayerId = room.turnOrder[room.counterActorIndex];
+      const nextPlayer = room.players.find(p => p.id === nextPlayerId);
+      
+      // Stop if it looped back to the original player who played the card
+      if (nextPlayerId === room.field.lastPlayerId) {
+        room.counterActorIndex = null;
+        return false;
+      }
+
+      if (!nextPlayer || nextPlayer.isOut) continue;
+      
+      // Found the next active player to make a counter decision
+      return true;
+    } while (true);
   }
 
   /**
@@ -859,6 +895,7 @@ export class GameEngine {
       pendingEffect: room.pendingEffect,
       finishOrder: [...room.finishOrder],
       logs: room.logs || [],
+      counterActorId: room.counterActorIndex !== null ? room.turnOrder[room.counterActorIndex] : null,
     };
   }
 

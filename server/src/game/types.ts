@@ -107,6 +107,7 @@ export interface Room {
   };
   logs: LogEntry[];
   pendingFinishPlayerId: string | null;
+  counterActorIndex: number | null;
 }
 
 // ===== Client-visible state (sanitized) =====
@@ -122,6 +123,7 @@ export interface ClientGameState {
   pendingEffect: PendingEffect | null;
   finishOrder: string[];
   logs: LogEntry[];
+  counterActorId: string | null;
 }
 
 export interface ClientPlayer {
