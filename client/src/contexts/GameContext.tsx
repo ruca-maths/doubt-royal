@@ -49,8 +49,8 @@ interface GameProviderProps {
 }
 
 export function GameProvider({ children, socket, isConnected }: GameProviderProps) {
-  const [playerName, setPlayerName] = useState(() => localStorage.getItem('playerName') || '');
-  const [roomId, setRoomId] = useState<string | null>(() => localStorage.getItem('roomId') || null);
+  const [playerName, setPlayerName] = useState(() => sessionStorage.getItem('playerName') || '');
+  const [roomId, setRoomId] = useState<string | null>(() => sessionStorage.getItem('roomId') || null);
   const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(null);
   const [gameState, setGameState] = useState<ClientGameState | null>(null);
   const [doubtResult, setDoubtResult] = useState<DoubtResult | null>(null);
@@ -58,24 +58,24 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
   const myId = socket?.id || null;
 
   const [persistentId] = useState(() => {
-    let id = localStorage.getItem('persistentId');
+    let id = sessionStorage.getItem('persistentId');
     if (!id) {
       id = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-      localStorage.setItem('persistentId', id);
+      sessionStorage.setItem('persistentId', id);
     }
     return id;
   });
 
-  // Sync playerName and roomId to localStorage
+  // Sync playerName and roomId to sessionStorage
   useEffect(() => {
-    localStorage.setItem('playerName', playerName);
+    sessionStorage.setItem('playerName', playerName);
   }, [playerName]);
 
   useEffect(() => {
     if (roomId) {
-      localStorage.setItem('roomId', roomId);
+      sessionStorage.setItem('roomId', roomId);
     } else {
-      localStorage.removeItem('roomId');
+      sessionStorage.removeItem('roomId');
     }
   }, [roomId]);
 

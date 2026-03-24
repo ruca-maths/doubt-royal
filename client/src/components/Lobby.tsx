@@ -204,9 +204,9 @@ export default function Lobby() {
           <div className="mt-8 pt-6 border-t border-white/5 text-center">
             <button
               onClick={() => {
-                localStorage.removeItem('playerName');
-                localStorage.removeItem('roomId');
-                localStorage.removeItem('persistentId');
+                sessionStorage.removeItem('playerName');
+                sessionStorage.removeItem('roomId');
+                sessionStorage.removeItem('persistentId');
                 window.location.reload();
               }}
               className="text-xs text-gray-700 hover:text-gray-400 transition-colors uppercase tracking-widest font-bold"
