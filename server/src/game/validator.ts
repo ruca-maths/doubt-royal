@@ -25,6 +25,10 @@ export function validatePlayCards(
     return { valid: false, reason: 'カードを選択してください' };
   }
 
+  if (cards.length > 6) {
+    return { valid: false, reason: '一度に出せるカードは最大6枚です' };
+  }
+
   if (declaredNumber < 0 || declaredNumber > 13) {
     return { valid: false, reason: '無効な宣言数字です' };
   }
@@ -54,16 +58,16 @@ export function validatePlayCards(
 
 /**
  * Check if the finish is forbidden (禁止上がり).
- * Forbidden: finishing with 8, 2, or Joker (in normal)
- * Revolution: finishing with 8, 3, or Joker
+ * Judgment is based ONLY on the declared number, NOT the actual cards.
+ * Forbidden declarations: 8, 2 (normal), 3 (revolution), 0 (Joker)
  */
 export function checkForbiddenFinish(
   declaredNumber: number,
   lastCards: Card[],
   isRevolution: boolean
 ): boolean {
-  // Check joker
-  if (lastCards.some(c => c.isJoker)) return true;
+  // Joker declaration (0) is always forbidden
+  if (declaredNumber === 0) return true;
 
   // 8 is always forbidden
   if (declaredNumber === 8) return true;

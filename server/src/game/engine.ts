@@ -48,6 +48,7 @@ export class GameEngine {
     room.pendingEffect = null;
     room.deferredEffect = null;
     room.doubtTimerId = null;
+    room.pendingFinishPlayerId = null;
     room.logs = []; // Initialize logs
   }
 
@@ -143,31 +144,11 @@ export class GameEngine {
       room.deferredEffect = effectResult.pendingEffect;
     }
 
-    // Check win condition
+    // Mark that this player MAY be finishing (hand is empty)
+    // Actual win/forbidden-finish is resolved AFTER doubt phase
+    // so that a liar can be caught before winning.
     if (player.hand.length === 0) {
-      const isForbidden = checkForbiddenFinish(
-        declaredNumber,
-        cards,
-        room.rules.isRevolution
-      );
-
-      if (isForbidden) {
-        // Forbidden finish: player is eliminated
-        player.isOut = true;
-        player.rank = -1; // marked as last
-      } else {
-        // Legal finish
-        room.finishOrder.push(playerId);
-        player.rank = room.finishOrder.length;
-        player.isOut = true; // out of the game (finished)
-      }
-
-      // Check if game is over
-      const activePlayersInside = room.players.filter(p => !p.isOut);
-      if (activePlayersInside.length <= 1) {
-        GameEngine.finalizeGame(room);
-        return { success: true, skipDoubt: true };
-      }
+      room.pendingFinishPlayerId = playerId;
     }
 
     // Check if doubt should be skipped based on effect (though updated to false for 8 now)
@@ -528,6 +509,49 @@ export class GameEngine {
           GameEngine.advanceTurn(room);
         }
       }
+    }
+
+    // After all doubt resolution, resolve any pending finish
+    GameEngine.resolvePendingFinish(room);
+  }
+
+  /**
+   * Resolve pending finish after doubt phase.
+   * If the player's hand is still empty, apply win/forbidden-finish logic.
+   * If doubt succeeded (cards returned to hand), the finish is canceled.
+   */
+  static resolvePendingFinish(room: Room): void {
+    const finishPlayerId = room.pendingFinishPlayerId;
+    if (!finishPlayerId) return;
+
+    room.pendingFinishPlayerId = null;
+
+    const player = room.players.find(p => p.id === finishPlayerId);
+    if (!player || player.isOut) return;
+
+    // If cards were returned to hand (doubt success), finish is canceled
+    if (player.hand.length > 0) return;
+
+    // Player's hand is still empty — resolve finish
+    const isForbidden = checkForbiddenFinish(
+      room.field.declaredNumber,
+      room.field.currentCards,
+      room.rules.isRevolution
+    );
+
+    if (isForbidden) {
+      player.isOut = true;
+      player.rank = -1;
+    } else {
+      room.finishOrder.push(finishPlayerId);
+      player.rank = room.finishOrder.length;
+      player.isOut = true;
+    }
+
+    // Check if game is over
+    const activePlayers = room.players.filter(p => !p.isOut);
+    if (activePlayers.length <= 1) {
+      GameEngine.finalizeGame(room);
     }
   }
 

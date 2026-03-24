@@ -106,6 +106,7 @@ export interface Room {
     skippedPlayerIds: string[];
   };
   logs: LogEntry[];
+  pendingFinishPlayerId: string | null;
 }
 
 // ===== Client-visible state (sanitized) =====

@@ -162,8 +162,8 @@ export class DoubtManager {
       room.field.currentCards = [];
 
       if (room.field.doubtType === 'counter') {
-        // Phase 7: Counter was a lie -> cards go to face-up pool (publicly revealed)
-        room.field.faceUpPool.push(...revealedCards);
+        // Phase 7: Counter was a lie -> cards handled by engine.ts (revealedCards -> faceUpPool)
+        // Do NOT push here to avoid duplication.
       } else {
         // Normal doubt: return cards to liar's hand
         lastPlayer.hand.push(...revealedCards);

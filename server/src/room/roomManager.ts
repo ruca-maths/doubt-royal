@@ -56,6 +56,7 @@ export class RoomManager {
       deferredEffect: null,
       doubtTimerId: null,
       logs: [],
+      pendingFinishPlayerId: null,
     };
 
     rooms.set(roomId, room);
