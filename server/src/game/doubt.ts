@@ -165,8 +165,7 @@ export class DoubtManager {
         // Phase 7: Counter was a lie -> cards handled by engine.ts (revealedCards -> faceUpPool)
         // Do NOT push here to avoid duplication.
       } else {
-        // Normal doubt: return cards to liar's hand
-        lastPlayer.hand.push(...revealedCards);
+        // Normal doubt: cards will be returned to hand in GameEngine.handleDoubtResult
       }
       
       const penaltyCardCount = 0; // History is NOT taken

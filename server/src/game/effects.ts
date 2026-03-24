@@ -34,7 +34,11 @@ export function applyCardEffect(
 
     case 5:
       // 5スキ: skip next N players
-      applySkip(room, playerId, playedCards.length);
+      // If all other active players are skipped (loop back to self), clear field
+      if (applySkipAndCheckLoop(room, playerId, playedCards.length)) {
+        shouldClearField = true;
+        skipDoubt = false;
+      }
       break;
 
     case 11:
@@ -53,12 +57,16 @@ export function applyCardEffect(
 
     case 6:
       // 回収: player collects N cards from faceUpPool (Face-up Grave)
+      // But NOT if this is the player's last play (finishing move)
       if (room.field.faceUpPool.length > 0) {
-        pendingEffect = {
-          type: 'sixCollect',
-          playerId: playerId,
-          count: Math.min(playedCards.length, room.field.faceUpPool.length),
-        };
+        const sixPlayer = room.players.find(p => p.id === playerId);
+        if (sixPlayer && sixPlayer.hand.length > 0) {
+          pendingEffect = {
+            type: 'sixCollect',
+            playerId: playerId,
+            count: Math.min(playedCards.length, room.field.faceUpPool.length),
+          };
+        }
       }
       break;
 
@@ -86,7 +94,11 @@ export function applyCardEffect(
   return { shouldClearField, pendingEffect, skipDoubt };
 }
 
-function applySkip(room: Room, playerId: string, count: number): void {
+/**
+ * Apply skip and check if all other active players are skipped (loop back).
+ * Returns true if the skip loops back to the player who played 5.
+ */
+function applySkipAndCheckLoop(room: Room, playerId: string, count: number): boolean {
   const playerIdx = room.turnOrder.indexOf(playerId);
   const dir = room.rules.direction;
   const total = room.turnOrder.length;
@@ -99,6 +111,11 @@ function applySkip(room: Room, playerId: string, count: number): void {
       player.isSkipped = true;
     }
   }
+
+  // Check if all other active players are now skipped
+  const otherActivePlayers = room.players.filter(p => !p.isOut && p.id !== playerId);
+  const allSkipped = otherActivePlayers.length > 0 && otherActivePlayers.every(p => p.isSkipped);
+  return allSkipped;
 }
 
 /**

@@ -336,8 +336,18 @@ export class GameEngine {
     } else if (result.type === 'success') {
       GameEngine.addLog(room, 'doubtSuccess', result.doubterId, { revealedCards: result.revealedCards });
       
-      // Move the liar's revealed cards to face-up graveyard (NOT back to hand)
+      // Move the liar's revealed cards to face-up graveyard (Standard)
       room.field.faceUpPool.push(...result.revealedCards);
+
+      // EXTRA: If it was a normal doubt (NOT a counter doubt), 
+      // return the cards also to the liar's hand (Doubt Royale specific rule)
+      if (room.field.doubtType !== 'counter') {
+        const liar = room.players.find(p => p.id === result.liarId);
+        if (liar) {
+          liar.hand.push(...result.revealedCards);
+          GameEngine.sanitizeHand(liar);
+        }
+      }
 
       // Rollback: return previous field state
       let wasCounterFail = false;
@@ -504,6 +514,18 @@ export class GameEngine {
           room.field.pendingNumbers = undefined;
           room.phase = 'playing';
           GameEngine.advanceTurn(room);
+        } else if (room.field.declaredNumber === 5) {
+          // 5-skip loop-back: check if all other active players are skipped
+          const otherActive = room.players.filter(p => !p.isOut && p.id !== room.field.lastPlayerId);
+          const allSkipped = otherActive.length > 0 && otherActive.every(p => p.isSkipped);
+          if (allSkipped) {
+            clearField(room);
+            room.phase = 'playing';
+            // Player who played 5 continues (no advanceTurn)
+          } else {
+            room.phase = 'playing';
+            GameEngine.advanceTurn(room);
+          }
         } else {
           room.phase = 'playing';
           GameEngine.advanceTurn(room);
@@ -662,6 +684,7 @@ export class GameEngine {
         
         if (nextPlayer && !nextPlayer.isOut) {
           nextPlayer.hand.push(...cardsToPass);
+          GameEngine.sanitizeHand(nextPlayer);
           GameEngine.addLog(room, 'sevenPass', playerId, { 
             cardCount: cardsToPass.length, 
             targetPlayerName: nextPlayer.name 
@@ -682,6 +705,7 @@ export class GameEngine {
           player.hand.push(room.field.faceUpPool[idx]);
           room.field.faceUpPool.splice(idx, 1);
         }
+        GameEngine.sanitizeHand(player);
         GameEngine.addLog(room, 'sixCollect', playerId, { cardCount: cardIds.length });
         break;
       }
@@ -890,6 +914,18 @@ export class GameEngine {
     if (activePlayers.length <= 1) {
       GameEngine.finalizeGame(room);
     }
+  }
+
+  /**
+   * Helper to ensure hand integrity (no duplicate card IDs).
+   */
+  static sanitizeHand(player: Player): void {
+    const seenIds = new Set<string>();
+    player.hand = player.hand.filter(card => {
+      if (seenIds.has(card.id)) return false;
+      seenIds.add(card.id);
+      return true;
+    });
   }
 
   static finalizeGame(room: Room): void {

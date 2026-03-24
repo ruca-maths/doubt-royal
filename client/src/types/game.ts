@@ -98,18 +98,18 @@ export interface RoomInfo {
 
 export type DoubtResult =
   | { type: 'noDoubt' }
-  | {
+    | {
       type: 'counter';
       countererId: string;
       lastPlayerId: string;
-      revealedCards: Card[];
+      revealedCards?: Card[];
       count: number;
     }
   | {
       type: 'success';
       doubterId: string;
       liarId: string;
-      revealedCards: Card[];
+      revealedCards?: Card[];
       penaltyCardCount: number;
       count: number;
       doubtType: 'play' | 'discard';
@@ -118,7 +118,7 @@ export type DoubtResult =
       type: 'failure';
       doubterId: string;
       honestPlayerId: string;
-      revealedCards: Card[];
+      revealedCards?: Card[];
       penaltyCardCount: number;
       count: number;
       doubtType: 'play' | 'discard';

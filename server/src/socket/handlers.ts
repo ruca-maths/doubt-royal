@@ -317,13 +317,17 @@ function resolveAndBroadcastCounter(io: Server, room: import('../game/types').Ro
   GameEngine.handleDoubtResult(room, result);
 
   if (result.type === 'counter') {
-    io.to(room.id).emit('doubt-result', {
+    const payload: any = {
       type: 'counter',
       countererId: result.countererId,
       lastPlayerId: result.lastPlayerId,
-      revealedCards: result.revealedCards,
       count: result.count,
-    });
+    };
+    // Only send revealedCards if they were actually revealed (doubt failure/success or counter success)
+    if (result.wasRevealed) {
+      payload.revealedCards = result.revealedCards;
+    }
+    io.to(room.id).emit('doubt-result', payload);
   } else {
     // No counter
     // Handle the effect (8-cut etc) normally through handleDoubtResult 

@@ -108,7 +108,7 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
           
           {/* Revealed cards */}
           <div className="flex justify-center gap-2 mt-2">
-            {doubtResult.revealedCards.map((card, i) => (
+            {doubtResult.revealedCards?.map((card, i) => (
               <div key={i} className="bg-white rounded-lg px-3 py-2 text-black font-bold text-sm shadow-md">
                 {card.isJoker ? '🃏 JOKER' : `${card.suit === 'heart' || card.suit === 'diamond' ? '🔴' : '⚫'} ${getDeclaredNumberDisplay(card.number)}`}
               </div>
