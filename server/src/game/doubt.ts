@@ -14,9 +14,10 @@ export class DoubtManager {
     room.doubtSkippers = [];
     room.field.counteredBy = null;
 
+    const factor = room.field.doubtType === 'counter' ? 1.5 : 1.0;
     const timer = setTimeout(() => {
       onTimeout(room);
-    }, (room.rules.doubtTime || 5) * 1000);
+    }, (room.rules.doubtTime || 5) * 1000 * factor);
 
     room.doubtTimerId = timer;
     return timer;
@@ -160,6 +161,10 @@ export class DoubtManager {
       // Doubt SUCCESS: the player was lying
       const revealedCards = [...room.field.currentCards];
       room.field.currentCards = [];
+      
+      // Phase 7/14: Doubted cards are revealed -> move to face-up graveyard (Requirement 4)
+      // Liar's cards do NOT return to hand (Requirement 5)
+      room.field.faceUpPool.push(...revealedCards);
 
       if (room.field.doubtType === 'counter') {
         // Phase 7: Counter was a lie -> cards handled by engine.ts (revealedCards -> faceUpPool)
@@ -182,8 +187,11 @@ export class DoubtManager {
       };
     } else {
       // Doubt FAILURE: the player was honest
-      // The cards remain in currentCards so the game continues requiring this strength.
+      // Phase 14: Doubted cards are revealed -> move to face-up graveyard (Requirement 4)
       const revealedCards = [...room.field.currentCards];
+      room.field.faceUpPool.push(...revealedCards);
+      room.field.currentCards = []; // Remove from currentCards since they moved to grave
+
 
       // Penalty: Doubter (loser) loses a life. (Card history is no longer picked up).
       doubter.lives -= 1;

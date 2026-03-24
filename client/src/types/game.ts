@@ -35,7 +35,8 @@ export type EffectType =
   | 'queenBomber'
   | 'doubtCardSelect'
   | 'fourCounter'
-  | 'spadeThree';
+  | 'spadeThree'
+  | 'counterSelection';
 
 export interface PendingEffect {
   type: EffectType;

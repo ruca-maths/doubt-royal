@@ -49,6 +49,7 @@ export class GameEngine {
     room.deferredEffect = null;
     room.doubtTimerId = null;
     room.pendingFinishPlayerId = null;
+    room.passCount = 0;
     room.logs = []; // Initialize logs
   }
 
@@ -115,6 +116,8 @@ export class GameEngine {
     room.field.lastPlayerId = playerId;
     room.field.doubtType = 'play';
     room.field.counteredBy = null;
+    room.passCount = 0; // Reset pass count on play
+
 
     GameEngine.addLog(room, 'play', playerId, { declaredNumber, cardCount: cards.length });
 
@@ -179,13 +182,22 @@ export class GameEngine {
       return { success: false, error: '場が流れた後は必ずカードを出してください' };
     }
 
-    GameEngine.addLog(room, 'pass', playerId);
+    room.passCount++;
+    const activePlayers = room.players.filter(p => !p.isOut);
 
     const oldIndex = room.currentPlayerIndex;
     const dir = room.rules.direction;
     const total = room.turnOrder.length;
 
     this.advanceTurn(room);
+
+    
+    // Check if everyone else passed (Requirement 6)
+    if (room.passCount >= activePlayers.length - 1) {
+      clearField(room);
+      room.passCount = 0;
+    }
+
     
     const newIndex = room.currentPlayerIndex;
     const lastPlayerIdx = room.turnOrder.indexOf(room.field.lastPlayerId!);
@@ -336,18 +348,22 @@ export class GameEngine {
     } else if (result.type === 'success') {
       GameEngine.addLog(room, 'doubtSuccess', result.doubterId, { revealedCards: result.revealedCards });
       
-      // Move the liar's revealed cards to face-up graveyard (Standard)
+      // Move the liar's revealed cards to face-up graveyard (Standard + Req 4)
       room.field.faceUpPool.push(...result.revealedCards);
 
-      // EXTRA: If it was a normal doubt (NOT a counter doubt), 
-      // return the cards also to the liar's hand (Doubt Royale specific rule)
-      if (room.field.doubtType !== 'counter') {
-        const liar = room.players.find(p => p.id === result.liarId);
-        if (liar) {
-          liar.hand.push(...result.revealedCards);
-          GameEngine.sanitizeHand(liar);
-        }
+      // Phase 14: Liar's cards NOT returned to hand (Requirement 5)
+      // (The block that returned them to hand has been removed)
+
+      // Phase 14: Track that this player failed to play (lied and caught)
+      room.passCount++;
+      
+      // Check for field clear if everyone else failed to play (Requirement 6)
+      const activePlayers = room.players.filter(p => !p.isOut);
+      if (room.passCount >= activePlayers.length - 1) {
+        clearField(room);
+        room.passCount = 0;
       }
+
 
       // Rollback: return previous field state
       let wasCounterFail = false;
@@ -407,6 +423,11 @@ export class GameEngine {
       if (room.rollbackState && room.rollbackState.currentCards.length > 0) {
         room.field.cardHistory.push(...room.rollbackState.currentCards);
       }
+
+      // Phase 14: Honest play is successful -> reset pass count
+      room.passCount = 0;
+
+
 
       // Reward: Honest player (winner) gives N cards to Doubter (loser)
       room.pendingEffect = {
@@ -602,7 +623,11 @@ export class GameEngine {
     do {
       room.counterActorIndex = ((room.counterActorIndex + room.rules.direction) % total + total) % total;
       attempts++;
-      if (attempts > total) return false;
+      if (attempts > total) {
+        room.counterActorIndex = null;
+        room.pendingEffect = null;
+        return false;
+      }
 
       const nextPlayerId = room.turnOrder[room.counterActorIndex];
       const nextPlayer = room.players.find(p => p.id === nextPlayerId);
@@ -610,12 +635,23 @@ export class GameEngine {
       // Stop if it looped back to the original player who played the card
       if (nextPlayerId === room.field.lastPlayerId) {
         room.counterActorIndex = null;
+        room.pendingEffect = null;
         return false;
       }
 
       if (!nextPlayer || nextPlayer.isOut) continue;
       
       // Found the next active player to make a counter decision
+      // Set pending effect to trigger UI (Requirement 2)
+      const isEight = room.field.declaredNumber === 8;
+      const count = isEight ? room.rollbackState!.currentCards.length + 1 : 1;
+      
+      room.pendingEffect = {
+        type: 'counterSelection',
+        playerId: nextPlayerId,
+        count: count,
+      };
+
       return true;
     } while (true);
   }

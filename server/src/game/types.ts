@@ -53,7 +53,9 @@ export type EffectType =
   | 'queenBomber'     // Q: specify numbers to bomb
   | 'doubtCardSelect' // doubt success: pick card from liar
   | 'fourCounter'     // 4: counter 8-cut
-  | 'spadeThree';     // spade 3: counter single joker
+  | 'spadeThree'      // spade 3: counter single joker
+  | 'counterSelection'; // Sequential counter selection UI
+
 
 export interface PendingEffect {
   type: EffectType;
@@ -108,6 +110,7 @@ export interface Room {
   logs: LogEntry[];
   pendingFinishPlayerId: string | null;
   counterActorIndex: number | null;
+  passCount: number;
 }
 
 // ===== Client-visible state (sanitized) =====

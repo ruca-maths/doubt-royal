@@ -4,7 +4,7 @@ import Card from './Card';
 import { getDeclaredNumberDisplay, sortCards } from '../utils/cardUtils';
 
 export default function InteractionModal() {
-  const { gameState, myId, effectAction } = useGame();
+  const { gameState, myId, effectAction, skipDoubt, declareCounter } = useGame();
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
   const [selectedNumbers, setSelectedNumbers] = useState<number[]>([]);
 
@@ -51,6 +51,7 @@ export default function InteractionModal() {
     tenDiscard: '10捨て札 — カードを捨てる',
     queenBomber: 'Qボンバー — 数字を指定',
     doubtCardSelect: 'ダウト報酬 — カードを渡す',
+    counterSelection: 'カウンター実行 — カードを選択',
   };
 
   const descriptions: Record<string, string> = {
@@ -59,6 +60,7 @@ export default function InteractionModal() {
     tenDiscard: `手札から${effect.count}枚以下のカードを選んで捨ててください（0枚でも可）`,
     queenBomber: `最大${effect.count}個の数字を指定してください（全員がその数字を強制捨て。0個でも可）`,
     doubtCardSelect: `自分の手札から${effect.count}枚以下のカードを選んで、相手に渡してください（0枚でも可）`,
+    counterSelection: `${getDeclaredNumberDisplay(gameState?.field.declaredNumber === 8 ? 4 : 3)}を${effect.count}枚選んでカウンターしてください`,
   };
 
   // Cards to pick from
@@ -72,7 +74,9 @@ export default function InteractionModal() {
   const excludedNumbers = (effect as any).excludedNumbers as number[] | undefined;
 
   const isReady =
-    (effect.type === 'queenBomber' ? selectedNumbers.length <= effect.count : selectedCardIds.length <= effect.count);
+    effect.type === 'counterSelection'
+      ? selectedCardIds.length === effect.count
+      : (effect.type === 'queenBomber' ? selectedNumbers.length <= effect.count : selectedCardIds.length <= effect.count);
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 animate-fade-in">
@@ -136,25 +140,40 @@ export default function InteractionModal() {
           </div>
         )}
 
-        <button
-          onClick={() => {
-            if (effect.type === 'queenBomber') {
-              effectAction(selectedCardIds, { numbers: selectedNumbers });
-            } else {
-              effectAction(selectedCardIds);
-            }
-            setSelectedCardIds([]);
-            setSelectedNumbers([]);
-          }}
-          disabled={!isReady}
-          className={`w-full py-3 rounded-xl font-bold transition-all ${
-            isReady
-              ? 'bg-gradient-to-r from-game-accent to-purple-500 text-white glow-accent'
-              : 'bg-game-card text-gray-600 cursor-not-allowed'
-          }`}
-        >
-          {isReady ? '確定して実行' : '選択してください'}
-        </button>
+        <div className="flex gap-3">
+          {effect.type === 'counterSelection' && (
+            <button
+               onClick={() => {
+                 skipDoubt();
+                 setSelectedCardIds([]);
+               }}
+               className="flex-1 py-3 rounded-xl bg-game-card hover:bg-game-border text-gray-400 font-semibold transition-all"
+            >
+              パス
+            </button>
+          )}
+          <button
+            onClick={() => {
+              if (effect.type === 'queenBomber') {
+                effectAction(selectedCardIds, { numbers: selectedNumbers });
+              } else if (effect.type === 'counterSelection') {
+                declareCounter(selectedCardIds);
+              } else {
+                effectAction(selectedCardIds);
+              }
+              setSelectedCardIds([]);
+              setSelectedNumbers([]);
+            }}
+            disabled={!isReady}
+            className={`flex-1 py-3 rounded-xl font-bold transition-all ${
+              isReady
+                ? 'bg-gradient-to-r from-game-accent to-purple-500 text-white glow-accent'
+                : 'bg-game-card text-gray-600 cursor-not-allowed'
+            }`}
+          >
+            {isReady ? '確定して実行' : '選択してください'}
+          </button>
+        </div>
       </div>
     </div>
   );

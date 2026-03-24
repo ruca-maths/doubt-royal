@@ -58,6 +58,7 @@ export class RoomManager {
       logs: [],
       pendingFinishPlayerId: null,
       counterActorIndex: null,
+      passCount: 0,
     };
 
     rooms.set(roomId, room);

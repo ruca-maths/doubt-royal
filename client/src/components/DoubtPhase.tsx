@@ -10,7 +10,9 @@ interface DoubtPhaseProps {
 export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
   const { gameState, myId, declareDoubt, skipDoubt } = useGame();
   
-  const doubtTimeMs = (gameState?.rules.doubtTime || 5) * 1000;
+  const isCounterPhase = gameState?.phase === 'counterPhase';
+  const doubtTimeMs = (gameState?.rules.doubtTime || 5) * 1000 * (isCounterPhase ? 1.5 : 1.0);
+
   const [timeLeft, setTimeLeft] = useState(doubtTimeMs);
   const [hasActed, setHasActed] = useState(false);
 
@@ -122,8 +124,8 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
   // Only show during doubt phase or counter phase
   if (gameState?.phase !== 'doubtPhase' && gameState?.phase !== 'counterPhase') return null;
 
-  const isCounterPhase = gameState.phase === 'counterPhase';
   const progress = (timeLeft / doubtTimeMs) * 100;
+
   const declaredNum = gameState.field.declaredNumber;
   const lastPlayerName = gameState.players.find(
     p => p.id === gameState.field.lastPlayerId
@@ -143,6 +145,7 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
                 ? `${lastPlayerName} のカウンターに対するダウト確認` 
                 : `${lastPlayerName} が ${gameState.field.currentCardCount}枚${isDiscard ? '捨てた' : '出した'}`)}
         </p>
+
         <div className="text-4xl font-black mb-1 text-game-accent-light" style={{ fontFamily: 'Orbitron, sans-serif' }}>
           {isCounterPhase ? '確認中' : `宣言: ${getDeclaredNumberDisplay(declaredNum)}`}
         </div>
