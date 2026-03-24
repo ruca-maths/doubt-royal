@@ -47,13 +47,11 @@ export default function Lobby() {
               {roomInfo.players.map((p, i) => (
                 <div
                   key={p.id}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                    p.id === myId ? 'bg-game-accent/10 border border-game-accent/20' : 'bg-game-card/50'
-                  }`}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${p.id === myId ? 'bg-game-accent/10 border border-game-accent/20' : 'bg-game-card/50'
+                    }`}
                 >
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                    p.id === roomInfo.hostId ? 'bg-game-gold text-black' : 'bg-game-card text-gray-400'
-                  }`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${p.id === roomInfo.hostId ? 'bg-game-gold text-black' : 'bg-game-card text-gray-400'
+                    }`}>
                     {p.id === roomInfo.hostId ? '👑' : i + 1}
                   </div>
                   <span className="font-medium flex-1">{p.name}</span>
@@ -83,11 +81,10 @@ export default function Lobby() {
               <button
                 onClick={() => startGame({ doubtTime })}
                 disabled={roomInfo.players.length < 2}
-                className={`w-full py-4 rounded-xl font-bold text-lg transition-all duration-200 ${
-                  roomInfo.players.length >= 2
-                    ? 'bg-gradient-to-r from-game-accent to-purple-500 text-white hover:opacity-90 glow-accent'
-                    : 'bg-game-card text-gray-600 cursor-not-allowed'
-                }`}
+                className={`w-full py-4 rounded-xl font-bold text-lg transition-all duration-200 ${roomInfo.players.length >= 2
+                  ? 'bg-gradient-to-r from-game-accent to-purple-500 text-white hover:opacity-90 glow-accent'
+                  : 'bg-game-card text-gray-600 cursor-not-allowed'
+                  }`}
                 style={{ fontFamily: 'Orbitron, sans-serif' }}
               >
                 {roomInfo.players.length < 2 ? '2人以上で開始可能' : 'ゲーム開始'}
@@ -158,11 +155,10 @@ export default function Lobby() {
           <button
             onClick={createRoom}
             disabled={!playerName.trim()}
-            className={`w-full py-4 rounded-xl font-bold text-lg mb-4 transition-all duration-200 ${
-              playerName.trim()
-                ? 'bg-gradient-to-r from-game-accent to-purple-500 text-white hover:opacity-90 glow-accent'
-                : 'bg-game-card text-gray-600 cursor-not-allowed'
-            }`}
+            className={`w-full py-4 rounded-xl font-bold text-lg mb-4 transition-all duration-200 ${playerName.trim()
+              ? 'bg-gradient-to-r from-game-accent to-purple-500 text-white hover:opacity-90 glow-accent'
+              : 'bg-game-card text-gray-600 cursor-not-allowed'
+              }`}
             style={{ fontFamily: 'Orbitron, sans-serif' }}
           >
             ルーム作成
@@ -190,11 +186,10 @@ export default function Lobby() {
             <button
               onClick={() => joinRoom(joinRoomId)}
               disabled={!playerName.trim() || !joinRoomId.trim()}
-              className={`px-6 py-3 rounded-xl font-bold transition-all duration-200 ${
-                playerName.trim() && joinRoomId.trim()
-                  ? 'bg-game-success text-white hover:opacity-90'
-                  : 'bg-game-card text-gray-600 cursor-not-allowed'
-              }`}
+              className={`px-6 py-3 rounded-xl font-bold transition-all duration-200 ${playerName.trim() && joinRoomId.trim()
+                ? 'bg-game-success text-white hover:opacity-90'
+                : 'bg-game-card text-gray-600 cursor-not-allowed'
+                }`}
             >
               参加
             </button>
@@ -206,16 +201,17 @@ export default function Lobby() {
           <h3 className="text-xl font-black mb-4 text-center bg-gradient-to-r from-game-accent to-purple-400 bg-clip-text text-transparent" style={{ fontFamily: 'Orbitron, sans-serif' }}>
             RULES
           </h3>
-          
+
           <div className="space-y-6 text-sm text-gray-300">
             {/* Base Rules */}
             <div>
               <h4 className="font-bold text-white mb-2 border-b border-white/10 pb-1">🎴 基本ルール（大富豪ベース）</h4>
               <ul className="list-disc pl-5 space-y-1">
-                <li>前の人が出したカードより強いカードを出します。</li>
-                <li>パスは何回でも可能。全員がパスすると「場が流れ」、最後にカードを出した人から再開します。</li>
-                <li>手札を最初に無くした人が勝者（あがり）となります。</li>
+                <li>カードは裏向きに出し、そのカードの数字を宣言します。（嘘をついても良い）</li>
+                <li>通常の大富豪と同じく、前の人が出したカードより強いカードを出します。</li>
                 <li>強さ： <span className="text-game-accent-light">3 ＜ 4 ＜ 5 ... J ＜ Q ＜ K ＜ A ＜ 2</span> ＜ ジョーカー（最強）</li>
+                <li>最後にカードを出したプレイヤー以外全員がパスすると「場が流れ」、最後にカードを出したプレイヤーから再開します。</li>
+                <li>手札を最初に無くした人が勝者（あがり）となります。</li>
               </ul>
             </div>
 
@@ -224,28 +220,28 @@ export default function Lobby() {
               <h4 className="font-bold text-white mb-2 border-b border-white/10 pb-1">⚡ 特殊役・効果カード</h4>
               <div className="grid grid-cols-1 gap-2">
                 <div className="bg-white/5 p-2 rounded-lg">
-                  <span className="font-bold text-game-gold">8切り</span>: 場をリセットし、自分のターンから再開する（場が流れる）。
+                  <span className="font-bold text-game-gold">8切り</span>: 場を流し、自分のターンから再開する。
                 </div>
                 <div className="bg-white/5 p-2 rounded-lg">
-                  <span className="font-bold text-game-gold">11バック</span>: J(11)を出すと、場が流れるまでカードの強さが逆転する（2が最弱、3が最強）。ジョーカーは常に最強。
+                  <span className="font-bold text-game-gold">11バック</span>: J(11)を出すと、場が流れるまでカードの強さが逆転する（2が最弱、3が最強。ただし革命時は反対となる。）。ジョーカーは常に最強。
                 </div>
                 <div className="bg-white/5 p-2 rounded-lg">
-                  <span className="font-bold text-game-gold">革命</span>: 同じ数字を4枚以上同時に出すと、以降ずっとカードの強さが逆転する。
+                  <span className="font-bold text-game-gold">革命</span>: 同じ数字を4枚以上同時に出すと、以降カードの強さが逆転する。（再び誰かが革命をした場合は、カードの強さが逆転する。）
                 </div>
                 <div className="bg-white/5 p-2 rounded-lg">
-                  <span className="font-bold text-purple-400">10捨て札</span>: 出した枚数分、手札から好きなカードを捨てられる（0枚も可）。
+                  <span className="font-bold text-purple-400">10捨て札</span>: 10を出した枚数分、手札から好きなカードを捨てられる（0枚も可）。
                 </div>
                 <div className="bg-white/5 p-2 rounded-lg">
-                  <span className="font-bold text-purple-400">7渡し</span>: 次の順序のプレイヤーに、手札からカードを渡す（0枚も可）。
+                  <span className="font-bold text-purple-400">7渡し</span>: 7を出すと次の順序のプレイヤーに、手札から7の枚数分までカードを渡せる（0枚も可）。
                 </div>
                 <div className="bg-white/5 p-2 rounded-lg">
-                  <span className="font-bold text-purple-400">6回収</span>: 表向きの墓地から、好きなカードを回収して手札に加えられる。
+                  <span className="font-bold text-purple-400">6回収</span>: 6を出した枚数分まで、表向きの墓地から好きなカードを回収して手札に加えられる。
                 </div>
                 <div className="bg-white/5 p-2 rounded-lg">
-                  <span className="font-bold text-purple-400">5スキップ</span>: 次のターンを迎えるはずだったプレイヤーをスキップする。
+                  <span className="font-bold text-purple-400">5スキップ</span>: 5を出した枚数だけ、プレイヤーをスキップできる。
                 </div>
                 <div className="bg-white/5 p-2 rounded-lg border border-game-danger/30">
-                  <span className="font-bold text-game-danger">Qボンバー(12)</span>: 数字を指定し、全員の手札からその数字を強制的に破壊（破棄）させる。
+                  <span className="font-bold text-game-danger">Qボンバー(12)</span>: Qを出すと、数字またはジョーカーを指定し、全員の手札からその数字を強制的に破壊（破棄）させる。
                 </div>
               </div>
             </div>
@@ -257,11 +253,11 @@ export default function Lobby() {
               <div className="space-y-2">
                 <div className="bg-white/5 p-2 rounded-lg">
                   <span className="font-bold text-blue-400">4カウンター (対8切り)</span><br />
-                  8切りに対して、「出された8の枚数＋1枚の4」を出すとカウンター成功。場が流れ、4を出した人のターンから再開される。
+                  8切りに対して、「出された8の枚数＋1枚の4」を出すとカウンターが成功。場が流れ、4を出した人のターンから再開される。
                 </div>
                 <div className="bg-white/5 p-2 rounded-lg">
-                  <span className="font-bold text-blue-400">スペ3返し (対ジョーカー単体)</span><br/>
-                  単独で出されたジョーカーに対して、「スペードの3」を出すとカウンター成功。ジョーカーを打ち消して場が流れ、スペ3を出した人から再開。
+                  <span className="font-bold text-blue-400">スペ3返し (対ジョーカー単体)</span><br />
+                  単独で出されたジョーカーに対して、「スペードの3」を出すとカウンター成功。ジョーカーを打ち消して場が流れ、スペ3を出した人から再開される。
                 </div>
               </div>
             </div>
@@ -270,11 +266,11 @@ export default function Lobby() {
             <div>
               <h4 className="font-bold text-game-danger mb-2 border-b border-game-danger/20 pb-1">🕵️ ダウトシステム</h4>
               <ul className="list-disc pl-5 space-y-1">
-                <li>通常のカード出しやカウンターアクション時、カードは一旦「裏向き」で場に出ます。</li>
-                <li>他プレイヤーは、宣言された数字と実際のカードに嘘があると思えば「ダウト！」を宣言できます。</li>
-                <li><span className="text-game-danger">ダウト成功（嘘発覚）</span>: 場のカードは手札に戻り、対象プレイヤーの番はスキップされます。</li>
-                <li><span className="text-game-success">ダウト失敗（正直）</span>: ダウトしたプレイヤー（ダウター）はライフを1つ失い、正直者はダウターへ手札のカードを押し付ける報酬を得ます。</li>
-                <li>※ 本作ではカードを出さずとも「嘘のカード（適当な他カード）」を出して乗り切ったり、強力なカウンターをブラフで発動することが可能です。</li>
+                <li>通常のカード出しやカウンターアクション時、プレイヤーはカードを「裏向き」で場に出し、カードが何の数字であるか宣言します。</li>
+                <li>他プレイヤーは、宣言された数字が嘘であると思えば「ダウト！」を宣言し、カードを「表向き」にして、カードの数字が宣言されたものと同じか確認できます。</li>
+                <li><span className="text-game-danger">ダウト成功</span>: ダウトを成功したプレイヤーは、嘘のカードを出したプレイヤーに、出したカードの枚数分までのカードを手札から渡すことができる。ダウトされたカードは表墓地へ移され、ダウトされたプレイヤーをスキップしてターンが再開される。</li>
+                <li><span className="text-game-success">ダウト失敗</span>: ダウトしたプレイヤーはライフを1つ失い、カードを出したプレイヤーはダウトしたプレイヤーへ、出したカードの枚数分までのカードを手札から渡すことができる。</li>
+                <li>ダウトの指摘を3回失敗するとライフが0になり、その時点で負けとなる。</li>
               </ul>
             </div>
 
