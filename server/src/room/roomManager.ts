@@ -15,6 +15,8 @@ export class RoomManager {
       rank: null,
       isSkipped: false,
       isOut: false,
+      persistentId: hostId, // Use hostId as default persistentId for host if not provided
+      rankStats: {},
     };
 
     const room: Room = {
@@ -30,6 +32,7 @@ export class RoomManager {
         lastPlayerId: null,
         doubtType: null,
         counteredBy: null,
+        hasFieldCleared: false,
       },
       rules: {
         direction: 1,
@@ -52,12 +55,19 @@ export class RoomManager {
     return room;
   }
 
-  static joinRoom(roomId: string, playerId: string, playerName: string): { room?: Room; error?: string } {
+  static joinRoom(roomId: string, playerId: string, playerName: string, persistentId: string): { room?: Room; error?: string; isRejoin?: boolean; oldId?: string } {
     const room = rooms.get(roomId);
     if (!room) return { error: 'ルームが見つかりません' };
+
+    // Check for rejoin first
+    const existingPlayer = room.players.find(p => p.persistentId === persistentId);
+    if (existingPlayer) {
+      const oldId = existingPlayer.id;
+      return { room, isRejoin: true, oldId };
+    }
+
     if (room.phase !== 'waiting') return { error: 'ゲームは既に開始されています' };
     if (room.players.length >= 6) return { error: 'ルームが満員です' };
-    if (room.players.some(p => p.id === playerId)) return { error: '既にルームに参加しています' };
 
     const player: Player = {
       id: playerId,
@@ -67,6 +77,8 @@ export class RoomManager {
       rank: null,
       isSkipped: false,
       isOut: false,
+      persistentId,
+      rankStats: {},
     };
 
     room.players.push(player);
@@ -76,6 +88,12 @@ export class RoomManager {
   static leaveRoom(roomId: string, playerId: string): { room?: Room; deleted?: boolean } {
     const room = rooms.get(roomId);
     if (!room) return {};
+
+    // If game has started, don't remove the player, just let them be disconnected.
+    // They can rejoin using persistentId.
+    if (room.phase !== 'waiting') {
+      return { room };
+    }
 
     room.players = room.players.filter(p => p.id !== playerId);
 

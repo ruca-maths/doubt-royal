@@ -19,17 +19,32 @@ export function registerHandlers(io: Server): void {
       });
     });
 
-    socket.on('join-room', (data: { roomId: string; playerName: string }, callback) => {
-      const result = RoomManager.joinRoom(data.roomId, socket.id, data.playerName);
+    socket.on('join-room', (data: { roomId: string; playerName: string; persistentId: string }, callback) => {
+      const result = RoomManager.joinRoom(data.roomId, socket.id, data.playerName, data.persistentId);
       if (result.error) {
         callback({ success: false, error: result.error });
         return;
       }
+      
+      const room = result.room!;
       socket.join(data.roomId);
-      callback({ success: true, roomId: data.roomId });
+
+      if (result.isRejoin && result.oldId) {
+        console.log(`Reassigning player ID from ${result.oldId} to ${socket.id}`);
+        GameEngine.reassignPlayerId(room, result.oldId, socket.id);
+        
+        callback({ success: true, roomId: data.roomId, isRejoin: true });
+        
+        // Give the rejoined player the current game state immediately
+        const state = GameEngine.getClientState(room, socket.id);
+        socket.emit('game-state', state);
+      } else {
+        callback({ success: true, roomId: data.roomId });
+      }
+
       io.to(data.roomId).emit('room-update', {
-        players: result.room!.players.map(p => ({ id: p.id, name: p.name })),
-        hostId: result.room!.hostId,
+        players: room.players.map(p => ({ id: p.id, name: p.name })),
+        hostId: room.hostId,
       });
     });
 

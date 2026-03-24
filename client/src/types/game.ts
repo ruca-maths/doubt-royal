@@ -60,6 +60,7 @@ export interface ClientPlayer {
   isSkipped: boolean;
   isOut: boolean;
   isCurrentTurn: boolean;
+  rankStats: Record<number, number>;
 }
 
 export interface ClientFieldState {
@@ -72,6 +73,8 @@ export interface ClientFieldState {
   counteredBy: string | null;
   pendingNumbers?: number[];
   revealedCards?: Card[];
+  hasFieldCleared: boolean;
+  isEffectActive: boolean;
 }
 
 export interface ClientGameState {

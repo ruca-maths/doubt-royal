@@ -49,13 +49,35 @@ interface GameProviderProps {
 }
 
 export function GameProvider({ children, socket, isConnected }: GameProviderProps) {
-  const [playerName, setPlayerName] = useState('');
-  const [roomId, setRoomId] = useState<string | null>(null);
+  const [playerName, setPlayerName] = useState(() => sessionStorage.getItem('playerName') || '');
+  const [roomId, setRoomId] = useState<string | null>(() => sessionStorage.getItem('roomId') || null);
   const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(null);
   const [gameState, setGameState] = useState<ClientGameState | null>(null);
   const [doubtResult, setDoubtResult] = useState<DoubtResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const myId = socket?.id || null;
+
+  const [persistentId] = useState(() => {
+    let id = sessionStorage.getItem('persistentId');
+    if (!id) {
+      id = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      sessionStorage.setItem('persistentId', id);
+    }
+    return id;
+  });
+
+  // Sync playerName and roomId to sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem('playerName', playerName);
+  }, [playerName]);
+
+  useEffect(() => {
+    if (roomId) {
+      sessionStorage.setItem('roomId', roomId);
+    } else {
+      sessionStorage.removeItem('roomId');
+    }
+  }, [roomId]);
 
   useEffect(() => {
     if (!socket) return;
@@ -100,7 +122,10 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
 
   const createRoom = useCallback(() => {
     if (!socket || !playerName.trim()) return;
-    socket.emit('create-room', { playerName: playerName.trim() }, (res: any) => {
+    socket.emit('create-room', { 
+      playerName: playerName.trim(),
+      persistentId 
+    }, (res: any) => {
       if (res.success) {
         setRoomId(res.roomId);
         setError(null);
@@ -108,11 +133,15 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
         setError(res.error);
       }
     });
-  }, [socket, playerName]);
+  }, [socket, playerName, persistentId]);
 
   const joinRoom = useCallback((targetRoomId: string) => {
     if (!socket || !playerName.trim()) return;
-    socket.emit('join-room', { roomId: targetRoomId, playerName: playerName.trim() }, (res: any) => {
+    socket.emit('join-room', { 
+      roomId: targetRoomId, 
+      playerName: playerName.trim(),
+      persistentId
+    }, (res: any) => {
       if (res.success) {
         setRoomId(res.roomId);
         setError(null);
@@ -120,7 +149,15 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
         setError(res.error);
       }
     });
-  }, [socket, playerName]);
+  }, [socket, playerName, persistentId]);
+
+  // Handle auto-rejoin on refresh
+  useEffect(() => {
+    if (isConnected && socket && roomId && playerName && !roomInfo) {
+      console.log('Attempting auto-rejoin to', roomId);
+      joinRoom(roomId);
+    }
+  }, [isConnected, socket, roomId, playerName, roomInfo, joinRoom]);
 
   const leaveRoom = useCallback(() => {
     if (!socket) return;

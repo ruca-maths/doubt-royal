@@ -159,6 +159,20 @@ export default function GameBoard() {
               <div className="text-3xl font-black text-game-accent-light" style={{ fontFamily: 'Orbitron, sans-serif' }}>
                 {getDeclaredNumberDisplay(gameState.field.declaredNumber)}
               </div>
+              
+              {/* Phase 13: Q-Bomber Target Numbers */}
+              {gameState.field.pendingNumbers && gameState.field.pendingNumbers.length > 0 && (
+                <div className="mt-2 animate-pulse">
+                  <div className="text-[10px] text-game-danger font-bold uppercase tracking-wider">Targeting</div>
+                  <div className="flex justify-center gap-1">
+                    {gameState.field.pendingNumbers.map(num => (
+                      <span key={num} className="bg-game-danger/20 text-game-danger px-2 py-0.5 rounded text-sm font-black border border-game-danger/30">
+                        {num === 0 ? 'JOKER' : num}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="text-gray-600 py-4">

@@ -154,7 +154,7 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
           </div>
         )}
         {/* 4-counter effect only appears when it's a counter doubt phase */}
-        {getCardEffectName(declaredNum, gameState.rules.isRevolution) && (declaredNum !== 4 || isCounterDoubt) && (
+        {getCardEffectName(declaredNum, gameState.rules.isRevolution) && gameState.field.isEffectActive && (declaredNum !== 4 || isCounterDoubt) && (
           <div className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-yellow-500 animate-pulse-glow mb-4">
             {getCardEffectName(declaredNum, gameState.rules.isRevolution)}
           </div>

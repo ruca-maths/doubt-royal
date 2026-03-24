@@ -194,6 +194,19 @@ export default function Lobby() {
               参加
             </button>
           </div>
+
+          {/* Reset Action */}
+          <div className="mt-8 pt-6 border-t border-white/5 text-center">
+            <button
+              onClick={() => {
+                sessionStorage.clear();
+                window.location.reload();
+              }}
+              className="text-xs text-gray-700 hover:text-gray-400 transition-colors uppercase tracking-widest font-bold"
+            >
+              初期状態に戻す (セッションのリセット)
+            </button>
+          </div>
         </div>
 
         {/* Rules Section */}

@@ -32,6 +32,7 @@ export class GameEngine {
       lastPlayerId: null,
       doubtType: null,
       counteredBy: null,
+      hasFieldCleared: false,
     };
     room.rules = {
       direction: 1,
@@ -162,15 +163,9 @@ export class GameEngine {
       }
 
       // Check if game is over
-      const activePlayers = room.players.filter(p => !p.isOut);
-      if (activePlayers.length <= 1) {
-        if (activePlayers.length === 1) {
-          // Last player remaining gets their rank
-          const lastPlayer = activePlayers[0];
-          room.finishOrder.push(lastPlayer.id);
-          lastPlayer.rank = room.finishOrder.length;
-        }
-        room.phase = 'result';
+      const activePlayersInside = room.players.filter(p => !p.isOut);
+      if (activePlayersInside.length <= 1) {
+        GameEngine.finalizeGame(room);
         return { success: true, skipDoubt: true };
       }
     }
@@ -431,7 +426,8 @@ export class GameEngine {
             numbers.includes(c.number) || (numbers.includes(0) && c.isJoker)
           );
           p.hand = p.hand.filter(c => !toDiscard.some(d => d.id === c.id));
-          room.field.cardHistory.push(...toDiscard);
+          // Phase 13: 破壊されたカードは表墓地へ
+          room.field.faceUpPool.push(...toDiscard);
         }
         GameEngine.addLog(room, 'queenBomber', result.honestPlayerId, { targetNumbers: numbers });
         
@@ -446,11 +442,7 @@ export class GameEngine {
       // Check if game should end (doubter might be out due to life loss)
       const activePlayers = room.players.filter(p => !p.isOut);
       if (activePlayers.length <= 1) {
-        room.phase = 'result';
-        if (activePlayers.length === 1) {
-          room.finishOrder.push(activePlayers[0].id);
-          activePlayers[0].rank = room.finishOrder.length;
-        }
+        GameEngine.finalizeGame(room);
       } else {
         // Tag pendingEffect to check if we should enter counterPhase AFTER penalty
         const shouldEnterCounterPhase = 
@@ -512,7 +504,8 @@ export class GameEngine {
               numbers.includes(c.number) || (numbers.includes(0) && c.isJoker)
             );
             p.hand = p.hand.filter(c => !toDiscard.some(d => d.id === c.id));
-            room.field.cardHistory.push(...toDiscard);
+            // Phase 13: 破壊されたカードは表墓地へ
+            room.field.faceUpPool.push(...toDiscard);
           }
           GameEngine.addLog(room, 'queenBomber', room.field.lastPlayerId!, { targetNumbers: numbers });
 
@@ -723,7 +716,15 @@ export class GameEngine {
     }
 
     room.pendingEffect = null;
-    room.phase = 'playing';
+    
+    // Check for deferred effect (e.g. 7-pass after doubt penalty)
+    if (room.deferredEffect) {
+      room.pendingEffect = room.deferredEffect;
+      room.deferredEffect = null;
+      room.phase = 'effectPhase';
+    } else {
+      room.phase = 'playing';
+    }
 
     // Check if the player who used the effect just went out
     if (player.hand.length === 0 && !player.isOut) {
@@ -731,15 +732,9 @@ export class GameEngine {
       player.rank = room.finishOrder.length;
       player.isOut = true;
 
-      const activePlayers = room.players.filter(p => !p.isOut);
-      if (activePlayers.length <= 1) {
-        if (activePlayers.length === 1) {
-          const lastPlayer = activePlayers[0];
-          lastPlayer.isOut = true;
-          room.finishOrder.push(lastPlayer.id);
-          lastPlayer.rank = room.finishOrder.length;
-        }
-        room.phase = 'result';
+      const activePlayersAfterEffect = room.players.filter(p => !p.isOut);
+      if (activePlayersAfterEffect.length <= 1) {
+        GameEngine.finalizeGame(room);
         return { success: true };
       }
     }
@@ -784,6 +779,7 @@ export class GameEngine {
         isSkipped: p.isSkipped,
         isOut: p.isOut,
         isCurrentTurn: room.turnOrder[room.currentPlayerIndex] === p.id,
+        rankStats: p.rankStats,
       })),
       field: {
         currentCardCount: room.field.currentCards.length,
@@ -793,6 +789,13 @@ export class GameEngine {
         lastPlayerId: room.field.lastPlayerId,
         doubtType: room.field.doubtType,
         counteredBy: room.field.counteredBy,
+        pendingNumbers: room.field.pendingNumbers,
+        hasFieldCleared: room.field.hasFieldCleared,
+        isEffectActive: (
+          room.field.declaredNumber === 12 ? room.field.hasFieldCleared :
+          room.field.declaredNumber === 6 ? room.field.faceUpPool.length > 0 :
+          true
+        ),
       },
       rules: { ...room.rules },
       currentPlayerId: room.turnOrder[room.currentPlayerIndex],
@@ -853,14 +856,60 @@ export class GameEngine {
 
     const activePlayers = room.players.filter(p => !p.isOut);
     if (activePlayers.length <= 1) {
-      room.phase = 'result';
-      if (activePlayers.length === 1) {
-        // Last player gets remaining rank
-        const lastPlayer = activePlayers[0];
-        lastPlayer.isOut = true;
-        room.finishOrder.push(lastPlayer.id);
-        lastPlayer.rank = room.finishOrder.length;
-      }
+      GameEngine.finalizeGame(room);
     }
+  }
+
+  static finalizeGame(room: Room): void {
+    const activePlayers = room.players.filter(p => !p.isOut);
+    if (activePlayers.length === 1) {
+      const lastPlayer = activePlayers[0];
+      lastPlayer.isOut = true;
+      room.finishOrder.push(lastPlayer.id);
+      lastPlayer.rank = room.finishOrder.length;
+    }
+    
+    room.phase = 'result';
+    
+    // Update stats
+    room.players.forEach(p => {
+      if (p.rank !== null) {
+        p.rankStats[p.rank] = (p.rankStats[p.rank] || 0) + 1;
+      }
+    });
+  }
+
+  static reassignPlayerId(room: Room, oldId: string, newId: string): void {
+    if (room.hostId === oldId) room.hostId = newId;
+    if (room.field.lastPlayerId === oldId) room.field.lastPlayerId = newId;
+
+    room.players.forEach(p => {
+      if (p.id === oldId) p.id = newId;
+    });
+
+    room.turnOrder = room.turnOrder.map(id => id === oldId ? newId : id);
+    room.finishOrder = room.finishOrder.map(id => id === oldId ? newId : id);
+    room.doubtDeclarers = room.doubtDeclarers.map(id => id === oldId ? newId : id);
+    room.doubtSkippers = room.doubtSkippers.map(id => id === oldId ? newId : id);
+
+    if (room.pendingEffect) {
+      if (room.pendingEffect.playerId === oldId) room.pendingEffect.playerId = newId;
+      if (room.pendingEffect.targetPlayerId === oldId) room.pendingEffect.targetPlayerId = newId;
+    }
+
+    if (room.deferredEffect) {
+      if (room.deferredEffect.playerId === oldId) room.deferredEffect.playerId = newId;
+      if (room.deferredEffect.targetPlayerId === oldId) room.deferredEffect.targetPlayerId = newId;
+    }
+
+    if (room.rollbackState) {
+      if (room.rollbackState.lastPlayerId === oldId) room.rollbackState.lastPlayerId = newId;
+    }
+
+    // Update logs
+    room.logs.forEach(log => {
+      if (log.playerId === oldId) log.playerId = newId;
+      // Note: we keep log.playerName as is
+    });
   }
 }

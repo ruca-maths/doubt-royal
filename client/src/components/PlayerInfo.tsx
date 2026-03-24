@@ -76,6 +76,19 @@ export default function PlayerInfo({ player, isMe }: PlayerInfoProps) {
             </span>
           </div>
         )}
+
+        {/* Rank Stats */}
+        {player.rankStats && Object.keys(player.rankStats).length > 0 && (
+          <div className="mt-2 pt-1 border-t border-white/5 flex flex-wrap gap-x-2 gap-y-0.5 max-w-[120px]">
+            {Object.entries(player.rankStats)
+              .sort(([a], [b]) => Number(a) - Number(b))
+              .map(([rank, count]) => (
+                <span key={rank} className="text-[9px] text-gray-400 whitespace-nowrap">
+                  {rank}位:{count}
+                </span>
+              ))}
+          </div>
+        )}
       </div>
     </div>
   );

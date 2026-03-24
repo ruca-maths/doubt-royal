@@ -72,12 +72,14 @@ export function applyCardEffect(
       break;
 
     case 12:
-      // Qボンバー: specify N numbers
-      pendingEffect = {
-        type: 'queenBomber',
-        playerId: playerId,
-        count: playedCards.length,
-      };
+      // Qボンバー: specify N numbers (only if field has been cleared at least once)
+      if (room.field.hasFieldCleared) {
+        pendingEffect = {
+          type: 'queenBomber',
+          playerId: playerId,
+          count: playedCards.length,
+        };
+      }
       break;
   }
 
@@ -111,6 +113,7 @@ export function clearField(room: Room): void {
   room.field.declaredNumber = 0;
   room.field.lastPlayerId = null;
   room.field.doubtType = null;
+  room.field.hasFieldCleared = true;
 
   // Reset eleven-back when field is cleared
   room.rules.isElevenBack = false;
