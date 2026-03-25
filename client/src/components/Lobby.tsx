@@ -243,13 +243,16 @@ export default function Lobby() {
                   <span className="font-bold text-game-gold">8切り</span>: 場を流し、自分のターンから再開する。
                 </div>
                 <div className="bg-white/5 p-2 rounded-lg">
+                  <span className="font-bold text-game-gold">9リバース</span>: カードを出すプレイヤーの順番が逆回りになる。
+                </div>
+                <div className="bg-white/5 p-2 rounded-lg">
                   <span className="font-bold text-game-gold">11バック</span>: J(11)を出すと、場が流れるまでカードの強さが逆転する（2が最弱、3が最強。ただし革命時は反対となる。）。ジョーカーは常に最強。
                 </div>
                 <div className="bg-white/5 p-2 rounded-lg">
                   <span className="font-bold text-game-gold">革命</span>: 同じ数字を4枚以上同時に出すと、以降カードの強さが逆転する。（再び誰かが革命をした場合は、カードの強さが逆転する。）
                 </div>
                 <div className="bg-white/5 p-2 rounded-lg">
-                  <span className="font-bold text-purple-400">10捨て札</span>: 10を出した枚数分、手札から好きなカードを捨てられる（0枚も可）。
+                  <span className="font-bold text-purple-400">10捨て</span>: 10を出した枚数分、手札から好きなカードを捨てられる（0枚も可）。
                 </div>
                 <div className="bg-white/5 p-2 rounded-lg">
                   <span className="font-bold text-purple-400">7渡し</span>: 7を出すと次の順序のプレイヤーに、手札から7の枚数分までカードを渡せる（0枚も可）。
