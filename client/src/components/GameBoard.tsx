@@ -152,9 +152,17 @@ export default function GameBoard() {
                 {gameState.players.find(p => p.id === gameState.field.lastPlayerId)?.name} が出した
               </p>
               <div className="flex justify-center gap-1 mb-2">
-                {Array.from({ length: gameState.field.currentCardCount }).map((_, i) => (
-                  <div key={i} className="w-10 h-14 rounded-md card-back shadow-lg transform rotate-[-5deg]" style={{ marginLeft: i > 0 ? '-1rem' : '0' }} />
-                ))}
+                {gameState.field.revealedCards && gameState.field.revealedCards.length > 0 ? (
+                  gameState.field.revealedCards.map((c, i) => (
+                    <div key={c.id || i} className="w-10 h-14 rounded-md shadow-lg transform rotate-[-5deg]" style={{ marginLeft: i > 0 ? '-1rem' : '0' }}>
+                      <Card card={c} small forceBack={false} />
+                    </div>
+                  ))
+                ) : (
+                  Array.from({ length: gameState.field.currentCardCount }).map((_, i) => (
+                    <div key={i} className="w-10 h-14 rounded-md card-back shadow-lg transform rotate-[-5deg]" style={{ marginLeft: i > 0 ? '-1rem' : '0' }} />
+                  ))
+                )}
               </div>
               <div className="text-3xl font-black text-game-accent-light" style={{ fontFamily: 'Orbitron, sans-serif' }}>
                 {getDeclaredNumberDisplay(gameState.field.declaredNumber)}

@@ -7,6 +7,7 @@ export interface Card {
   suit: Suit | null;
   number: number;
   isJoker: boolean;
+  isFaceUp?: boolean;
 }
 
 export type GamePhase = 'waiting' | 'playing' | 'doubtPhase' | 'counterPhase' | 'effectPhase' | 'result';

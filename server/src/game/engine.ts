@@ -284,14 +284,7 @@ export class GameEngine {
           room.field.cardHistory.push(...room.rollbackState.currentCards);
         }
         
-        // Reset field manually (clearField would try to move empty currentCards)
-        room.field.currentCards = [];
-        room.field.declaredNumber = 0;
-        room.field.lastPlayerId = null;
-        room.field.doubtType = null;
-        room.field.hasFieldCleared = true;
-        room.rules.isElevenBack = false;
-        room.players.forEach(p => { p.isSkipped = false; });
+        clearField(room);
         
         // Turn moves to counterer
         room.currentPlayerIndex = room.turnOrder.indexOf(result.countererId);
@@ -318,14 +311,7 @@ export class GameEngine {
         room.field.cardHistory.push(...room.rollbackState.currentCards);
       }
       
-      // Reset field manually
-      room.field.currentCards = [];
-      room.field.declaredNumber = 0;
-      room.field.lastPlayerId = null;
-      room.field.doubtType = null;
-      room.field.hasFieldCleared = true;
-      room.rules.isElevenBack = false;
-      room.players.forEach(p => { p.isSkipped = false; });
+      clearField(room);
       
       // Set current player to the one who countered
       const countererIdx = room.turnOrder.indexOf(result.countererId);
@@ -418,9 +404,7 @@ export class GameEngine {
       GameEngine.addLog(room, 'doubtFailure', result.doubterId, { revealedCards: result.revealedCards });
       // Doubt failed (player was honest)
       
-      // Move honest revealed cards to face-up graveyard (Phase 14 / Req 4)
-      room.field.faceUpPool.push(...result.revealedCards);
-
+      // Face-up graveyard movement will be handled by clearField later (Requirement 4)
       
       const lastPlayer = room.players.find(p => p.id === result.honestPlayerId)!;
 
@@ -932,6 +916,7 @@ export class GameEngine {
         doubtType: room.field.doubtType,
         counteredBy: room.field.counteredBy,
         pendingNumbers: room.field.pendingNumbers,
+        revealedCards: room.field.currentCards.filter(c => c.isFaceUp),
         hasFieldCleared: room.field.hasFieldCleared,
         isEffectActive: (
           room.field.declaredNumber === 12 ? room.field.hasFieldCleared :

@@ -6,6 +6,7 @@ export interface Card {
   suit: Suit | null; // null for joker
   number: number;    // 1-13 for normal, 0 for joker
   isJoker: boolean;
+  isFaceUp?: boolean;
 }
 
 // ===== Player =====

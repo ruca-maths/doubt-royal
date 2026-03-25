@@ -112,10 +112,7 @@ export class DoubtManager {
         const countererId = room.field.lastPlayerId!;
         const lastPlayerId = room.rollbackState!.lastPlayerId!; // The one who played 8 or Joker
         
-        // Phase 7: No doubt -> counter cards stay face-down -> regular grave
-        room.field.cardHistory.push(...room.field.currentCards);
         const revealedCards = [...room.field.currentCards];
-        room.field.currentCards = [];
         
         return {
           type: 'counter',
@@ -187,11 +184,11 @@ export class DoubtManager {
       };
     } else {
       // Doubt FAILURE: the player was honest
-      // Phase 14: Doubted cards are revealed -> handled in engine.ts (Requirement 4)
+      // Phase 14: Doubted cards are revealed -> stays on field as face-up
       const revealedCards = [...room.field.currentCards];
-      room.field.currentCards = []; // Remove from field
-
-
+      for (const c of room.field.currentCards) {
+        c.isFaceUp = true;
+      }
 
       // Penalty: Doubter (loser) loses a life. (Card history is no longer picked up).
       doubter.lives -= 1;

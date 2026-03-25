@@ -123,8 +123,14 @@ function applySkipAndCheckLoop(room: Room, playerId: string, count: number): boo
  * Cards go to cardHistory (Regular Grave) because they were not doubted.
  */
 export function clearField(room: Room): void {
-  // Move current cards and history to Regular Grave
-  room.field.cardHistory.push(...room.field.currentCards);
+  // Move current cards to appropriate grave
+  for (const card of room.field.currentCards) {
+    if (card.isFaceUp) {
+      room.field.faceUpPool.push(card);
+    } else {
+      room.field.cardHistory.push(card);
+    }
+  }
 
   room.field.currentCards = [];
   room.field.declaredNumber = 0;
