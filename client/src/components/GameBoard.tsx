@@ -144,7 +144,7 @@ export default function GameBoard() {
       </div>
 
       {/* Center field */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
+      <div className="absolute top-[42%] left-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
         <div className="glass rounded-2xl px-8 py-6 min-w-[240px]">
           {gameState.field.lastPlayerId ? (
             <>

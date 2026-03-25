@@ -112,14 +112,15 @@ export class DoubtManager {
         const countererId = room.field.lastPlayerId!;
         const lastPlayerId = room.rollbackState!.lastPlayerId!; // The one who played 8 or Joker
         
-        const revealedCards = [...room.field.currentCards];
+        // Don't reveal the counter cards when no one doubted (counter succeeds)
+        const revealedCards: Card[] = [];
         
         return {
           type: 'counter',
           countererId,
           lastPlayerId,
           revealedCards,
-          count: revealedCards.length,
+          count: room.field.currentCards.length,
           wasRevealed: false, // Phase 7: track whether cards were revealed
         };
       }

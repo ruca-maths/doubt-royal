@@ -25,6 +25,10 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
       return;
     }
 
+    // Reset hasActed when the card player changes (e.g. play → counter transition)
+    setHasActed(false);
+    setTimeLeft(doubtTimeMs);
+
     const interval = setInterval(() => {
       setTimeLeft(prev => {
         const next = prev - 100;
@@ -33,7 +37,7 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
     }, 100);
 
     return () => clearInterval(interval);
-  }, [gameState?.phase]);
+  }, [gameState?.phase, gameState?.field.lastPlayerId]);
 
   const handleDoubt = useCallback(() => {
     if (hasActed || isMyCards) return;
