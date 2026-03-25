@@ -178,7 +178,7 @@ export class GameEngine {
       return { success: false, error: '現在パスできません' };
     }
 
-    if (room.field.currentCards.length === 0) {
+    if (room.field.lastPlayerId === null) {
       return { success: false, error: '場が流れた後は必ずカードを出してください' };
     }
 
@@ -260,6 +260,7 @@ export class GameEngine {
    */
   static handleDoubtResult(room: Room, result: DoubtResult): void {
     if (result.type === 'counter') {
+      room.passCount = 0;
       GameEngine.addLog(room, 'counter', result.countererId, { revealedCards: result.revealedCards });
 
       if (result.doubterId) {
@@ -356,14 +357,6 @@ export class GameEngine {
 
       // Phase 14: Track that this player failed to play (lied and caught)
       room.passCount++;
-      
-      // Check for field clear if everyone else failed to play (Requirement 6)
-      const activePlayers = room.players.filter(p => !p.isOut);
-      if (room.passCount >= activePlayers.length - 1) {
-        clearField(room);
-        room.passCount = 0;
-      }
-
 
       // Rollback: return previous field state
       let wasCounterFail = false;
@@ -395,6 +388,14 @@ export class GameEngine {
         if (room.field.currentCards.length === 0) {
           room.field.hasFieldCleared = true;
         }
+      }
+
+      // Check for field clear if everyone else failed to play (Requirement 6)
+      // Done AFTER rollback so that the restored cards are properly cleared!
+      const activePlayers = room.players.filter(p => !p.isOut);
+      if (room.passCount >= activePlayers.length - 1) {
+        clearField(room);
+        room.passCount = 0;
       }
 
       // Cancel any deferred effect (the play was a lie, so no effect should occur)
@@ -481,6 +482,7 @@ export class GameEngine {
       }
     } else {
       // No doubt
+      room.passCount = 0;
       // The cards were accepted, so previous cards go to history
       if (room.rollbackState && room.rollbackState.currentCards.length > 0) {
         room.field.cardHistory.push(...room.rollbackState.currentCards);
