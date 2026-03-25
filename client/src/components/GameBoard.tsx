@@ -155,7 +155,7 @@ export default function GameBoard() {
                 {gameState.field.revealedCards && gameState.field.revealedCards.length > 0 ? (
                   gameState.field.revealedCards.map((c, i) => (
                     <div key={c.id || i} className="w-10 h-14 rounded-md shadow-lg transform rotate-[-5deg]" style={{ marginLeft: i > 0 ? '-1rem' : '0' }}>
-                      <Card card={c} small forceBack={false} />
+                      <Card card={c} small faceDown={false} />
                     </div>
                   ))
                 ) : (
