@@ -137,6 +137,7 @@ export function clearField(room: Room): void {
   room.field.lastPlayerId = null;
   room.field.doubtType = null;
   room.field.hasFieldCleared = true;
+  room.passCount = 0;
 
   // Reset eleven-back when field is cleared
   room.rules.isElevenBack = false;

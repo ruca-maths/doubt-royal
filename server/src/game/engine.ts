@@ -183,46 +183,8 @@ export class GameEngine {
     }
 
     room.passCount++;
-    const activePlayers = room.players.filter(p => !p.isOut);
-
-    const oldIndex = room.currentPlayerIndex;
-    const dir = room.rules.direction;
-    const total = room.turnOrder.length;
 
     this.advanceTurn(room);
-
-    
-    // Check if everyone else passed (Requirement 6)
-    if (room.passCount >= activePlayers.length - 1) {
-      clearField(room);
-      room.passCount = 0;
-    }
-
-    
-    const newIndex = room.currentPlayerIndex;
-    const lastPlayerIdx = room.turnOrder.indexOf(room.field.lastPlayerId!);
-
-    // Calculate distance in direction of play
-    const getDist = (from: number, to: number) => {
-      if (from === to) return 0;
-      let dist = 0;
-      let curr = from;
-      while (curr !== to) {
-        curr = ((curr + dir) % total + total) % total;
-        dist++;
-        if (dist > total) break; // safety
-      }
-      return dist;
-    };
-
-    const distToLast = getDist(oldIndex, lastPlayerIdx);
-    const distToNew = getDist(oldIndex, newIndex);
-
-    // If we reached or crossed the lastPlayerId during advanceTurn, the field clears!
-    // This elegantly handles when lastPlayerId is 'out' or 'skipped' and their turn is bypassed.
-    if (distToLast > 0 && distToLast <= distToNew) {
-      clearField(room);
-    }
 
     GameEngine.addLog(room, 'pass', playerId);
 
@@ -255,6 +217,13 @@ export class GameEngine {
 
       break;
     } while (true);
+
+    // If the turn has come back to the player who last played cards,
+    // it means no valid card was played in between -> clear field
+    const nextPlayerId = room.turnOrder[room.currentPlayerIndex];
+    if (room.field.lastPlayerId && nextPlayerId === room.field.lastPlayerId) {
+      clearField(room);
+    }
   }
 
   /**
