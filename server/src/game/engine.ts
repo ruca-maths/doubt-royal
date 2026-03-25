@@ -650,7 +650,7 @@ export class GameEngine {
       // Found the next active player to make a counter decision
       // Set pending effect to trigger UI (Requirement 2)
       const isEight = room.field.declaredNumber === 8;
-      const count = isEight ? room.rollbackState!.currentCards.length + 1 : 1;
+      const count = isEight ? room.field.currentCards.length + 1 : 1;
       
       room.pendingEffect = {
         type: 'counterSelection',
