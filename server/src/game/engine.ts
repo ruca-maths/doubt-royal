@@ -224,6 +224,8 @@ export class GameEngine {
       clearField(room);
     }
 
+    GameEngine.addLog(room, 'pass', playerId);
+
     return { success: true };
   }
 
@@ -395,6 +397,18 @@ export class GameEngine {
         targetPlayerId: result.liarId,
         isFromDoubtSuccess: true,
       };
+
+      // If the counter was a lie, check if the original card was an 8-cut or single Joker
+      // so we can restore the effect after penalty
+      if (wasCounterFail) {
+        const restoredDeclared = room.field.declaredNumber;
+        const restoredCards = room.field.currentCards;
+        const is8Cut = restoredDeclared === 8;
+        const isSingleJoker = restoredDeclared === 0 && restoredCards.length === 1;
+        if (is8Cut || isSingleJoker) {
+          (room.pendingEffect as any).restoreEightCutAfter = true;
+        }
+      }
       
       // Note: We do NOT set liar.isSkipped = true.
       // Setting isSkipped would penalize them by skipping their *next* turn as well.
@@ -871,6 +885,16 @@ export class GameEngine {
 
     if (startCounter) {
       GameEngine.startCounterPhase(room);
+      return { success: true };
+    }
+
+    // If counter was a lie and original card was 8-cut, restore the effect
+    const restoreEightCut = (effect as any).restoreEightCutAfter;
+    if (restoreEightCut) {
+      GameEngine.addLog(room, 'eightCut', room.field.lastPlayerId || '');
+      clearField(room);
+      // Turn goes to the original 8-cut player (lastPlayerId was restored via rollback)
+      room.phase = 'playing';
       return { success: true };
     }
 
