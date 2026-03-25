@@ -710,6 +710,8 @@ export class GameEngine {
     room.field.lastPlayerId = playerId;
     room.field.doubtType = 'counter';
     room.phase = 'doubtPhase';
+    room.pendingEffect = null; // Fix: clear modal after counter
+
 
     // Start doubt phase immediately handled by handlers.ts
     // We only log the play action. Note: 'counter' action will be logged upon successful resolve.
