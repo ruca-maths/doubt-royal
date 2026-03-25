@@ -162,9 +162,9 @@ export class DoubtManager {
       const revealedCards = [...room.field.currentCards];
       room.field.currentCards = [];
       
-      // Phase 7/14: Doubted cards are revealed -> move to face-up graveyard (Requirement 4)
+      // Phase 7/14: Doubted cards are revealed -> handled in engine.ts (Requirement 4)
       // Liar's cards do NOT return to hand (Requirement 5)
-      room.field.faceUpPool.push(...revealedCards);
+
 
       if (room.field.doubtType === 'counter') {
         // Phase 7: Counter was a lie -> cards handled by engine.ts (revealedCards -> faceUpPool)
@@ -187,10 +187,10 @@ export class DoubtManager {
       };
     } else {
       // Doubt FAILURE: the player was honest
-      // Phase 14: Doubted cards are revealed -> move to face-up graveyard (Requirement 4)
+      // Phase 14: Doubted cards are revealed -> handled in engine.ts (Requirement 4)
       const revealedCards = [...room.field.currentCards];
-      room.field.faceUpPool.push(...revealedCards);
-      room.field.currentCards = []; // Remove from currentCards since they moved to grave
+      room.field.currentCards = []; // Remove from field
+
 
 
       // Penalty: Doubter (loser) loses a life. (Card history is no longer picked up).

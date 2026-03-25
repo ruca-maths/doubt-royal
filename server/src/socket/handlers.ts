@@ -361,17 +361,17 @@ function startDoubtTimer(io: Server, room: import('../game/types').Room): void {
 }
 
 function startCounterTimer(io: Server, room: import('../game/types').Room): void {
-  // Use same mechanism as doubt phase for simplicity, same duration
-  DoubtManager.startDoubtPhase(room, (r) => {
-    // If timer expires, act as if the current actor skipped
-    const hasNext = GameEngine.advanceCounterActor(r);
-    if (hasNext) {
-      startCounterTimer(io, r);
-    } else {
-      resolveAndBroadcastCounter(io, r);
-    }
-  });
-  room.phase = 'counterPhase'; // Override back to counterPhase
+  // Requirement 3: Counter phase decision time is now unlimited.
+  // We do NOT call DoubtManager.startDoubtPhase which sets a timeout.
+  // Instead, we just set the phase and broadcast to wait for user action.
+  room.phase = 'counterPhase';
   
+  // Clear any existing timer just in case
+  if (room.doubtTimerId) {
+    clearTimeout(room.doubtTimerId);
+    room.doubtTimerId = null;
+  }
+
   broadcastGameState(io, room);
 }
+

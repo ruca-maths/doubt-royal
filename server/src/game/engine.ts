@@ -417,6 +417,10 @@ export class GameEngine {
       GameEngine.addLog(room, 'doubtFailure', result.doubterId, { revealedCards: result.revealedCards });
       // Doubt failed (player was honest)
       
+      // Move honest revealed cards to face-up graveyard (Phase 14 / Req 4)
+      room.field.faceUpPool.push(...result.revealedCards);
+
+      
       const lastPlayer = room.players.find(p => p.id === result.honestPlayerId)!;
 
       // The cards were honestly played, so previous cards go to history
@@ -771,14 +775,20 @@ export class GameEngine {
           return { success: false, error: `最大${effect.count}枚まで選択可能です` };
         }
         if (cardIds.length === 0) break;
+        const collectedCards: Card[] = [];
         for (const cid of cardIds) {
           const idx = room.field.faceUpPool.findIndex(c => c.id === cid);
           if (idx === -1) return { success: false, error: '表向きカードにないカードです' };
-          player.hand.push(room.field.faceUpPool[idx]);
+          const card = room.field.faceUpPool[idx];
+          player.hand.push(card);
+          collectedCards.push(card);
           room.field.faceUpPool.splice(idx, 1);
         }
         GameEngine.sanitizeHand(player);
-        GameEngine.addLog(room, 'sixCollect', playerId, { cardCount: cardIds.length });
+        GameEngine.addLog(room, 'sixCollect', playerId, { 
+          cardCount: cardIds.length,
+          collectedCards: collectedCards 
+        });
         break;
       }
 
@@ -948,6 +958,7 @@ export class GameEngine {
       revealedCards?: Card[];
       targetPlayerName?: string;
       targetNumbers?: number[];
+      collectedCards?: Card[];
     }
   ): void {
     const player = room.players.find(p => p.id === playerId);

@@ -147,7 +147,7 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
         </p>
 
         <div className="text-4xl font-black mb-1 text-game-accent-light" style={{ fontFamily: 'Orbitron, sans-serif' }}>
-          {isCounterPhase ? '確認中' : `宣言: ${getDeclaredNumberDisplay(declaredNum)}`}
+          {isCounterPhase ? '無制限待機中' : `宣言: ${getDeclaredNumberDisplay(declaredNum)}`}
         </div>
         {pendingNumbers && (
           <div className="bg-game-danger/20 border border-game-danger/30 rounded-lg p-2 mb-4">
@@ -165,12 +165,15 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
         {(!getCardEffectName(declaredNum, gameState.rules.isRevolution) || (declaredNum === 4 && !isCounterDoubt)) && <div className="mb-4" />}
 
         {/* Timer bar */}
-        <div className="w-full h-2 bg-game-card rounded-full mb-6 overflow-hidden">
-          <div
-            className="doubt-timer-bar"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
+        {!isCounterPhase && (
+          <div className="w-full h-2 bg-game-card rounded-full mb-6 overflow-hidden">
+            <div
+              className="doubt-timer-bar"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        )}
+        {isCounterPhase && <div className="mb-6 h-2" />}
 
         {/* Buttons */}
         {gameState.pendingEffect?.playerId === myId ? null : isCounterPhase ? (

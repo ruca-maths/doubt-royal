@@ -133,6 +133,15 @@ export default function GameLog() {
                   <div className="text-sm text-purple-300">
                     <span className="font-bold">{log.playerName}</span> が
                     表向き墓地から <span className="text-white font-bold">{log.cardCount}枚</span> を回収しました。
+                    {log.collectedCards && log.collectedCards.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {log.collectedCards.map((c, i) => (
+                          <span key={i} className="text-[10px] bg-white/10 px-1 rounded text-white">
+                            {c.isJoker ? '🃏' : `${getDeclaredNumberDisplay(c.number)}`}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
                 break;

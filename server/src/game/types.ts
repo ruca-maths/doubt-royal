@@ -81,6 +81,7 @@ export interface LogEntry {
   revealedCards?: Card[];
   targetPlayerName?: string;
   targetNumbers?: number[];
+  collectedCards?: Card[];
 }
 
 // ===== Room =====
