@@ -143,10 +143,10 @@ export class DoubtManager {
     
     if (room.field.doubtType === 'counter') {
       if (declaredNumber === 4) {
-        // Honest if all cards are 4
-        wasLying = playedCards.some(c => c.number !== 4);
+        // Honest if all cards are 4 or Joker
+        wasLying = playedCards.some(c => !c.isJoker && c.number !== 4);
       } else if (declaredNumber === 3) {
-        // Honest if exactly 1 Space 3
+        // Spade 3 return: Honest ONLY if exactly 1 Space 3
         wasLying = playedCards.length !== 1 || playedCards[0].suit !== 'spade' || playedCards[0].number !== 3;
       }
     } else {

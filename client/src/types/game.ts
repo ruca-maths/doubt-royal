@@ -96,7 +96,11 @@ export interface ClientGameState {
 }
 
 export interface RoomInfo {
-  players: { id: string; name: string }[];
+  players: { 
+    id: string; 
+    name: string;
+    rankStats: Record<number, number>;
+  }[];
   hostId: string;
 }
 

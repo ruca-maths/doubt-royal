@@ -14,7 +14,11 @@ export function registerHandlers(io: Server): void {
       socket.join(room.id);
       
       const payload = {
-        players: room.players.map(p => ({ id: p.id, name: p.name })),
+        players: room.players.map(p => ({ 
+          id: p.id, 
+          name: p.name,
+          rankStats: p.rankStats
+        })),
         hostId: room.hostId,
       };
       
@@ -36,7 +40,11 @@ export function registerHandlers(io: Server): void {
         GameEngine.reassignPlayerId(room, result.oldId, socket.id);
         
         const updatedPayload = {
-          players: room.players.map(p => ({ id: p.id, name: p.name })),
+          players: room.players.map(p => ({ 
+            id: p.id, 
+            name: p.name,
+            rankStats: p.rankStats
+          })),
           hostId: room.hostId,
         };
         callback({ success: true, roomId: data.roomId, isRejoin: true, roomInfo: updatedPayload });
@@ -47,7 +55,11 @@ export function registerHandlers(io: Server): void {
         io.to(data.roomId).emit('room-update', updatedPayload);
       } else {
         const payload = {
-          players: room.players.map(p => ({ id: p.id, name: p.name })),
+          players: room.players.map(p => ({ 
+            id: p.id, 
+            name: p.name,
+            rankStats: p.rankStats
+          })),
           hostId: room.hostId,
         };
         callback({ success: true, roomId: data.roomId, roomInfo: payload });
@@ -67,7 +79,11 @@ export function registerHandlers(io: Server): void {
         io.to(roomId).emit('room-deleted');
       } else if (result.room) {
         io.to(roomId).emit('room-update', {
-          players: result.room.players.map(p => ({ id: p.id, name: p.name })),
+          players: result.room.players.map(p => ({ 
+            id: p.id, 
+            name: p.name,
+            rankStats: p.rankStats
+          })),
           hostId: result.room.hostId,
         });
       }
@@ -251,7 +267,11 @@ export function registerHandlers(io: Server): void {
           io.to(roomId).emit('room-deleted');
         } else if (result.room) {
           io.to(roomId).emit('room-update', {
-            players: result.room.players.map(p => ({ id: p.id, name: p.name })),
+            players: result.room.players.map(p => ({ 
+              id: p.id, 
+              name: p.name,
+              rankStats: p.rankStats
+            })),
             hostId: result.room.hostId,
           });
         }

@@ -59,8 +59,41 @@ export default function Lobby() {
                     }`}>
                     {p.id === roomInfo.hostId ? '👑' : i + 1}
                   </div>
-                  <span className="font-medium flex-1">{p.name}</span>
-                  {p.id === myId && <span className="text-xs text-game-accent-light">あなた</span>}
+                  <div className="flex-1">
+                    <div className="font-bold flex items-center gap-2">
+                       {p.name}
+                       {p.id === myId && <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-game-accent/20 text-game-accent-light uppercase">YOU</span>}
+                    </div>
+                    {/* Rank Stats */}
+                    <div className="flex gap-2 mt-1">
+                      {Object.keys(p.rankStats || {}).length > 0 ? (
+                        <>
+                          <div className="text-[10px] text-gray-500 font-bold uppercase">Stats:</div>
+                          <div className="flex gap-1.5">
+                            {p.rankStats[1] && (
+                              <span className="text-[10px] text-game-gold font-black">🥇{p.rankStats[1]}</span>
+                            )}
+                            {p.rankStats[2] && (
+                              <span className="text-[10px] text-gray-400 font-black">🥈{p.rankStats[2]}</span>
+                            )}
+                            {p.rankStats[-1] && (
+                              <span className="text-[10px] text-game-danger font-black">💀{p.rankStats[-1]}</span>
+                            )}
+                            {/* Other ranks as generic dots or counts */}
+                            {Object.entries(p.rankStats).filter(([r]) => r !== '1' && r !== '2' && r !== '-1').length > 0 && (
+                               <span className="text-[10px] text-gray-600 font-black">
+                                 OTH:{Object.entries(p.rankStats)
+                                   .filter(([r]) => r !== '1' && r !== '2' && r !== '-1')
+                                   .reduce((sum, [_, count]) => sum + (count as number), 0)}
+                               </span>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-[10px] text-gray-600 font-medium">No games played yet</div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>

@@ -180,8 +180,12 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
         {isCounterPhase && <div className="mb-6 h-2" />}
 
         {/* Buttons */}
-        {gameState.pendingEffect?.playerId === myId ? null : isCounterPhase ? (
-          gameState.counterActorId === myId && !hasActed ? (
+        {isCounterPhase ? (
+          gameState.pendingEffect?.playerId === myId ? (
+            <div className="py-5 text-game-accent-light text-lg font-bold animate-pulse">
+              🛡️ カウンター待機中...
+            </div>
+          ) : gameState.counterActorId === myId && !hasActed ? (
             <div className="space-y-3">
               <button
                 onClick={handleSkip}
@@ -195,42 +199,44 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
               相手のカウンター判定を待っています...
             </div>
           ) : gameState.counterActorId === myId && hasActed ? (
-             <div className="py-5 text-game-accent-light text-lg font-semibold animate-pulse">
-               ✅ 宣言済み
-             </div>
+            <div className="py-5 text-game-accent-light text-lg font-semibold animate-pulse">
+              ✅ 宣言済み
+            </div>
           ) : (
             <div className="py-5 text-gray-400 text-sm">
-              {gameState.players.find(p => p.id === gameState.counterActorId)?.name || '他のプレイヤー'} の判断を待機中...
+              {gameState.players.find(p => p.id === (gameState.pendingEffect?.playerId || gameState.counterActorId))?.name || '他のプレイヤー'} の判断を待機中...
             </div>
           )
         ) : (
           /* Normal doubt logic */
-          !isMyCards && !hasActed ? (
-            <div className="space-y-3">
-              <button
-                onClick={handleDoubt}
-                className="w-full py-5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-500 text-white text-2xl font-black
-                           hover:from-red-500 hover:to-rose-400 active:scale-95 transition-all duration-200
-                           animate-pulse-glow shadow-2xl"
-                style={{ fontFamily: 'Orbitron, sans-serif' }}
-              >
-                ダウト！
-              </button>
-              <button
-                onClick={handleSkip}
-                className="w-full py-3 rounded-xl bg-game-card hover:bg-game-border text-gray-400 hover:text-white font-medium transition-all"
-              >
-                スルー（ダウトしない）
-              </button>
-            </div>
-          ) : isMyCards ? (
-            <div className="py-5 text-gray-500 text-lg">
-              相手のダウト判定を待っています...
-            </div>
-          ) : (
-            <div className="py-5 text-game-accent-light text-lg font-semibold animate-pulse">
-              ✅ 宣言済み
-            </div>
+          gameState.pendingEffect?.playerId === myId ? null : (
+            !isMyCards && !hasActed ? (
+              <div className="space-y-3">
+                <button
+                  onClick={handleDoubt}
+                  className="w-full py-5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-500 text-white text-2xl font-black
+                             hover:from-red-500 hover:to-rose-400 active:scale-95 transition-all duration-200
+                             animate-pulse-glow shadow-2xl"
+                  style={{ fontFamily: 'Orbitron, sans-serif' }}
+                >
+                  ダウト！
+                </button>
+                <button
+                  onClick={handleSkip}
+                  className="w-full py-3 rounded-xl bg-game-card hover:bg-game-border text-gray-400 hover:text-white font-medium transition-all"
+                >
+                  スルー（ダウトしない）
+                </button>
+              </div>
+            ) : isMyCards ? (
+              <div className="py-5 text-gray-500 text-lg">
+                相手のダウト判定を待っています...
+              </div>
+            ) : (
+              <div className="py-5 text-game-accent-light text-lg font-semibold animate-pulse">
+                ✅ 宣言済み
+              </div>
+            )
           )
         )}
       </div>

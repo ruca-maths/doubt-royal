@@ -39,6 +39,8 @@ export default function InteractionModal() {
   const handleConfirm = () => {
     if (effect.type === 'queenBomber') {
       effectAction([], { numbers: selectedNumbers });
+    } else if (effect.type === 'counterSelection') {
+      declareCounter(selectedCardIds);
     } else {
       effectAction(selectedCardIds);
     }
@@ -47,11 +49,12 @@ export default function InteractionModal() {
   };
 
   const titles: Record<string, string> = {
+    sevenPass: '7渡し — カードを送る',
     sixCollect: '6回収 — カードを回収',
     tenDiscard: '10捨て札 — カードを捨てる',
     queenBomber: 'Qボンバー — 数字を指定',
     doubtCardSelect: 'ダウト報酬 — カードを渡す',
-    counterSelection: 'カウンター実行 — カードを選択',
+    counterSelection: 'カウンター形式 — カードを選択',
   };
 
   const descriptions: Record<string, string> = {
@@ -153,17 +156,7 @@ export default function InteractionModal() {
             </button>
           )}
           <button
-            onClick={() => {
-              if (effect.type === 'queenBomber') {
-                effectAction(selectedCardIds, { numbers: selectedNumbers });
-              } else if (effect.type === 'counterSelection') {
-                declareCounter(selectedCardIds);
-              } else {
-                effectAction(selectedCardIds);
-              }
-              setSelectedCardIds([]);
-              setSelectedNumbers([]);
-            }}
+            onClick={handleConfirm}
             disabled={!isReady}
             className={`flex-1 py-3 rounded-xl font-bold transition-all ${
               isReady

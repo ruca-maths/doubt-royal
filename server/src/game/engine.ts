@@ -219,10 +219,15 @@ export class GameEngine {
     } while (true);
 
     // If the turn has come back to the player who last played cards,
-    // it means no valid card was played in between -> clear field
+    // OR if everyone else has passed, clear the field.
+    const activePlayers = room.players.filter(p => !p.isOut);
     const nextPlayerId = room.turnOrder[room.currentPlayerIndex];
-    if (room.field.lastPlayerId && nextPlayerId === room.field.lastPlayerId) {
+    const isBackToLastPlayer = room.field.lastPlayerId && nextPlayerId === room.field.lastPlayerId;
+    const isEveryonePassed = room.passCount >= activePlayers.length - 1 && room.field.lastPlayerId !== null;
+
+    if (isBackToLastPlayer || isEveryonePassed) {
       clearField(room);
+      room.passCount = 0;
     }
   }
 
@@ -650,7 +655,7 @@ export class GameEngine {
       }
       counterDeclaredNumber = 4;
     }
-    // Spade 3
+    // Counter against Joker (must be Spade 3 return)
     else if (room.field.declaredNumber === 0 && room.field.currentCards.length === 1) {
       if (cards.length !== 1) {
         return { success: false, error: 'スペ3返しには 1枚のカードが必要です' };
