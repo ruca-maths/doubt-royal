@@ -1033,6 +1033,9 @@ export class GameEngine {
   static reassignPlayerId(room: Room, oldId: string, newId: string): void {
     if (room.hostId === oldId) room.hostId = newId;
     if (room.field.lastPlayerId === oldId) room.field.lastPlayerId = newId;
+    if (room.field.counteredBy === oldId) room.field.counteredBy = newId;
+
+    if (room.pendingFinishPlayerId === oldId) room.pendingFinishPlayerId = newId;
 
     room.players.forEach(p => {
       if (p.id === oldId) p.id = newId;
@@ -1055,6 +1058,9 @@ export class GameEngine {
 
     if (room.rollbackState) {
       if (room.rollbackState.lastPlayerId === oldId) room.rollbackState.lastPlayerId = newId;
+      if (room.rollbackState.skippedPlayerIds) {
+        room.rollbackState.skippedPlayerIds = room.rollbackState.skippedPlayerIds.map(id => id === oldId ? newId : id);
+      }
     }
 
     // Update logs
