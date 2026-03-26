@@ -149,11 +149,7 @@ export function registerHandlers(io: Server): void {
 
       GameEngine.startGame(room, settings);
 
-      // Send personalized game state to each player
-      for (const player of room.players) {
-        const state = GameEngine.getClientState(room, player.id);
-        io.to(player.id).emit('game-state', state);
-      }
+      broadcastGameState(io, room);
 
       cb?.({ success: true });
     });
@@ -165,11 +161,7 @@ export function registerHandlers(io: Server): void {
 
       GameEngine.startGame(room, { doubtTime: room.rules.doubtTime });
 
-      // Send personalized game state to each player
-      for (const player of room.players) {
-        const state = GameEngine.getClientState(room, player.id);
-        io.to(player.id).emit('game-state', state);
-      }
+      broadcastGameState(io, room);
 
       callback?.({ success: true });
     });
