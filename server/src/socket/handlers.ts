@@ -321,7 +321,15 @@ function broadcastGameState(io: Server, room: import('../game/types').Room): voi
 
   // Trigger AI effect decisions if applicable
   if (room.phase === 'effectPhase') {
-    AIEngine.runEffectDecision(room, () => broadcastGameState(io, room));
+    AIEngine.runEffectDecision(room, () => {
+      if (room.phase === 'doubtPhase') {
+        startDoubtTimer(io, room);
+      } else if (room.phase === 'counterPhase') {
+        startCounterTimer(io, room);
+      } else {
+        broadcastGameState(io, room);
+      }
+    });
   }
 
   // Trigger AI turn if it's an AI's turn
