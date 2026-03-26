@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useGame } from '../contexts/GameContext';
 
 export default function Lobby() {
-  const { playerName, setPlayerName, roomId, roomInfo, myId, createRoom, joinRoom, leaveRoom, startGame, isConnected, error, clearError } = useGame();
+  const { playerName, setPlayerName, roomId, roomInfo, myId, createRoom, joinRoom, leaveRoom, startGame, addAiPlayer, isConnected, error, clearError } = useGame();
   const [joinRoomId, setJoinRoomId] = useState('');
   const [doubtTime, setDoubtTime] = useState(5);
 
@@ -63,6 +63,7 @@ export default function Lobby() {
                     <div className="font-bold flex items-center gap-2">
                        {p.name}
                        {p.id === myId && <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-game-accent/20 text-game-accent-light uppercase">YOU</span>}
+                       {p.isAI && <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-500/20 text-gray-300 uppercase border border-gray-500/30">CPU</span>}
                     </div>
                     {/* Rank Stats */}
                     <div className="flex gap-2 mt-1">
@@ -114,6 +115,14 @@ export default function Lobby() {
                              focus:outline-none focus:border-game-accent/50 focus:ring-1 focus:ring-game-accent/30 transition-all"
                 />
               </div>
+            )}
+            {isHost && roomInfo.players.length < 6 && (
+              <button
+                onClick={addAiPlayer}
+                className="w-full py-2 mb-2 rounded-xl text-sm font-bold bg-game-card/50 border border-game-accent/30 text-game-accent-light hover:bg-game-accent/10 transition-all"
+              >
+                + CPUを追加
+              </button>
             )}
             {isHost && (
               <button

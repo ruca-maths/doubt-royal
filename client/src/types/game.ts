@@ -100,6 +100,7 @@ export interface RoomInfo {
     id: string; 
     name: string;
     rankStats: Record<number, number>;
+    isAI?: boolean;
   }[];
   hostId: string;
 }

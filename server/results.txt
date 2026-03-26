@@ -1,0 +1,17 @@
+﻿Starting verification test...
+P1 played 3.
+P2 doubted P1. Result: failure
+Handled doubt result. P1 cards on field: [ '3 (FaceUp: true)' ]
+P3 played 4 on top of face-up 3.
+No doubt for P3. Result: noDoubt
+--- Graveyard Check ---
+cardHistory IDs: []
+faceUpPool IDs: ["c1"]
+RESULT: P1 card correctly moved to faceUpPool.
+--- Clearing Field ---
+Cards on field before final clear: [ 'c2' ]
+Final graveyards after clearField:
+cardHistory IDs: ["c2"]
+faceUpPool IDs: ["c1"]
+RESULT: P3 card (face-down) moved to cardHistory.
+Verification finished.

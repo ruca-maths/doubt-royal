@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { RoomManager } from '../room/roomManager';
 import { GameEngine } from '../game/engine';
 import { DoubtManager, DoubtResult } from '../game/doubt';
+import { AIEngine } from '../game/ai';
 
 export function registerHandlers(io: Server): void {
   io.on('connection', (socket: Socket) => {
@@ -17,12 +18,49 @@ export function registerHandlers(io: Server): void {
         players: room.players.map(p => ({ 
           id: p.id, 
           name: p.name,
-          rankStats: p.rankStats
+          rankStats: p.rankStats,
+          isAI: p.isAI
         })),
         hostId: room.hostId,
       };
       
       callback({ success: true, roomId: room.id, roomInfo: payload });
+      io.to(room.id).emit('room-update', payload);
+    });
+
+    socket.on('add-ai-player', (callback) => {
+      const room = RoomManager.getRoomByPlayerId(socket.id);
+      if (!room) { callback?.({ success: false, error: 'ルームが見つかりません' }); return; }
+      if (room.hostId !== socket.id) { callback?.({ success: false, error: 'ホストのみAIを追加できます' }); return; }
+      if (room.phase !== 'waiting') { callback?.({ success: false, error: 'ゲームは既に開始されています' }); return; }
+      if (room.players.length >= 6) { callback?.({ success: false, error: 'ルームが満員です' }); return; }
+
+      const aiCount = room.players.filter(p => p.isAI).length;
+      const aiPlayer = {
+        id: `ai_${Math.random().toString(36).substring(2, 9)}`,
+        name: `COM ${aiCount + 1}`,
+        hand: [],
+        lives: 3,
+        rank: null,
+        isSkipped: false,
+        isOut: false,
+        persistentId: `ai_persistent_${Math.random()}`,
+        rankStats: {},
+        isAI: true
+      };
+
+      room.players.push(aiPlayer);
+
+      const payload = {
+        players: room.players.map(p => ({ 
+          id: p.id, 
+          name: p.name,
+          rankStats: p.rankStats,
+          isAI: p.isAI
+        })),
+        hostId: room.hostId,
+      };
+      callback?.({ success: true, roomInfo: payload });
       io.to(room.id).emit('room-update', payload);
     });
 
@@ -43,7 +81,8 @@ export function registerHandlers(io: Server): void {
           players: room.players.map(p => ({ 
             id: p.id, 
             name: p.name,
-            rankStats: p.rankStats
+            rankStats: p.rankStats,
+            isAI: p.isAI
           })),
           hostId: room.hostId,
         };
@@ -58,7 +97,8 @@ export function registerHandlers(io: Server): void {
           players: room.players.map(p => ({ 
             id: p.id, 
             name: p.name,
-            rankStats: p.rankStats
+            rankStats: p.rankStats,
+            isAI: p.isAI
           })),
           hostId: room.hostId,
         };
@@ -82,7 +122,8 @@ export function registerHandlers(io: Server): void {
           players: result.room.players.map(p => ({ 
             id: p.id, 
             name: p.name,
-            rankStats: p.rankStats
+            rankStats: p.rankStats,
+            isAI: p.isAI
           })),
           hostId: result.room.hostId,
         });
@@ -285,6 +326,38 @@ function broadcastGameState(io: Server, room: import('../game/types').Room): voi
     const state = GameEngine.getClientState(room, player.id);
     io.to(player.id).emit('game-state', state);
   }
+
+  // Trigger AI effect decisions if applicable
+  if (room.phase === 'effectPhase') {
+    AIEngine.runEffectDecision(room, () => broadcastGameState(io, room));
+  }
+
+  // Trigger AI turn if it's an AI's turn
+  if (room.phase === 'playing') {
+    const currentPlayerId = room.turnOrder[room.currentPlayerIndex];
+    const currentPlayer = room.players.find(p => p.id === currentPlayerId);
+    if (currentPlayer && currentPlayer.isAI && !currentPlayer.isOut) {
+      AIEngine.runPlayTurn(room, currentPlayerId, (actionType, result) => {
+        if (actionType === 'play' && result && result.success) {
+          // If game ended
+          if (room.phase === 'result') {
+            broadcastGameState(io, room);
+            return;
+          }
+
+          // Start doubt phase (unless explicitly skipped)
+          if (!result.skipDoubt && room.phase === 'doubtPhase') {
+            startDoubtTimer(io, room);
+          } else {
+            broadcastGameState(io, room);
+          }
+        } else {
+          // Pass or Error
+          broadcastGameState(io, room);
+        }
+      });
+    }
+  }
 }
 
 function resolveAndBroadcastDoubt(io: Server, room: import('../game/types').Room): void {
@@ -377,6 +450,12 @@ function startDoubtTimer(io: Server, room: import('../game/types').Room): void {
     resolveAndBroadcastDoubt(io, r);
   });
   
+  AIEngine.runDoubtDecision(
+    room, 
+    (playerId) => { io.to(room.id).emit('doubt-declared', { playerId }); },
+    () => { resolveAndBroadcastDoubt(io, room); }
+  );
+  
   broadcastGameState(io, room);
 }
 
@@ -391,6 +470,19 @@ function startCounterTimer(io: Server, room: import('../game/types').Room): void
     clearTimeout(room.doubtTimerId);
     room.doubtTimerId = null;
   }
+
+  AIEngine.runCounterDecision(
+    room,
+    (playerId) => { io.to(room.id).emit('counter-declared', { playerId }); startDoubtTimer(io, room); },
+    () => {
+      const hasNext = GameEngine.advanceCounterActor(room);
+      if (hasNext) {
+        startCounterTimer(io, room);
+      } else {
+        resolveAndBroadcastCounter(io, room);
+      }
+    }
+  );
 
   broadcastGameState(io, room);
 }

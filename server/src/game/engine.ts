@@ -4,8 +4,9 @@ import {
 } from './types';
 import { createDeck, shuffleDeck, dealCards } from './deck';
 import { validatePlayCards, checkForbiddenFinish } from './validator';
-import { applyCardEffect, clearField } from './effects';
+import { applyCardEffect, clearField, moveCardsToGrave } from './effects';
 import { DoubtManager, DoubtResult } from './doubt';
+import { AIEngine } from './ai';
 
 export class GameEngine {
   /**
@@ -257,7 +258,7 @@ export class GameEngine {
         // Phase 7: Route rollback cards (Joker) to appropriate graveyard
         // Joker was played face-down initially, so it goes to regular grave
         if (room.rollbackState) {
-          room.field.cardHistory.push(...room.rollbackState.currentCards);
+          moveCardsToGrave(room, room.rollbackState.currentCards);
         }
         
         clearField(room);
@@ -284,7 +285,7 @@ export class GameEngine {
       // Phase 7: Route rollback cards (the original 8s) to appropriate graveyard
       // Original 8s were played face-down and never revealed -> regular grave
       if (room.rollbackState) {
-        room.field.cardHistory.push(...room.rollbackState.currentCards);
+        moveCardsToGrave(room, room.rollbackState.currentCards);
       }
       
       clearField(room);
@@ -398,7 +399,7 @@ export class GameEngine {
 
       // The cards were honestly played, so previous cards go to history
       if (room.rollbackState && room.rollbackState.currentCards.length > 0) {
-        room.field.cardHistory.push(...room.rollbackState.currentCards);
+        moveCardsToGrave(room, room.rollbackState.currentCards);
       }
 
       // Phase 14: Honest play is successful -> reset pass count
@@ -457,7 +458,7 @@ export class GameEngine {
       room.passCount = 0;
       // The cards were accepted, so previous cards go to history
       if (room.rollbackState && room.rollbackState.currentCards.length > 0) {
-        room.field.cardHistory.push(...room.rollbackState.currentCards);
+        moveCardsToGrave(room, room.rollbackState.currentCards);
       }
 
       // Check for 4-stop (8-cut survived) or Spade 3 (single Joker survived)
@@ -793,7 +794,7 @@ export class GameEngine {
         player.hand = player.hand.filter(c => !cardIds.includes(c.id));
         
         GameEngine.addLog(room, 'discard', playerId, { cardCount: cardsToDiscard.length });
-        room.field.cardHistory.push(...cardsToDiscard);
+        moveCardsToGrave(room, cardsToDiscard);
         
         break;
       }

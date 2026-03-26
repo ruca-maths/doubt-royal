@@ -119,18 +119,25 @@ function applySkipAndCheckLoop(room: Room, playerId: string, count: number): boo
 }
 
 /**
- * Clear field and reset eleven-back.
- * Cards go to cardHistory (Regular Grave) because they were not doubted.
+ * Move cards to the appropriate graveyard based on their isFaceUp status.
  */
-export function clearField(room: Room): void {
-  // Move current cards to appropriate grave
-  for (const card of room.field.currentCards) {
+export function moveCardsToGrave(room: Room, cards: Card[]): void {
+  for (const card of cards) {
     if (card.isFaceUp) {
       room.field.faceUpPool.push(card);
     } else {
       room.field.cardHistory.push(card);
     }
   }
+}
+
+/**
+ * Clear field and reset eleven-back.
+ * Cards go to appropriate grave based on their revealed status.
+ */
+export function clearField(room: Room): void {
+  // Move current cards to appropriate grave
+  moveCardsToGrave(room, room.field.currentCards);
 
   room.field.currentCards = [];
   room.field.declaredNumber = 0;

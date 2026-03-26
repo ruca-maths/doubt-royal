@@ -17,6 +17,7 @@ interface GameContextValue {
   joinRoom: (roomId: string) => void;
   leaveRoom: () => void;
   startGame: (settings?: { doubtTime: number }) => void;
+  addAiPlayer: () => void;
 
   // Game
   gameState: ClientGameState | null;
@@ -138,6 +139,19 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
     });
   }, [socket, playerName, persistentId]);
 
+  const addAiPlayer = useCallback(() => {
+    if (!socket) return;
+    socket.emit('add-ai-player', (res: any) => {
+      console.log('[DEBUG] add-ai-player callback:', res);
+      if (res.success) {
+        if (res.roomInfo) setRoomInfo(res.roomInfo);
+        setError(null);
+      } else {
+        setError(res.error);
+      }
+    });
+  }, [socket]);
+
   const joinRoom = useCallback((targetRoomId: string) => {
     if (!socket || !playerName.trim()) return;
     socket.emit('join-room', { 
@@ -242,7 +256,7 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
     socket, isConnected, myId,
     playerName, setPlayerName,
     roomId, roomInfo,
-    createRoom, joinRoom, leaveRoom, startGame,
+    createRoom, joinRoom, leaveRoom, startGame, addAiPlayer,
     gameState, doubtResult,
     playCards, passTurn, playAgain, declareDoubt, skipDoubt, declareCounter, effectAction,
     error, clearError,
