@@ -534,6 +534,16 @@ export class GameEngine {
 
     // After all doubt resolution, resolve any pending finish
     GameEngine.resolvePendingFinish(room);
+
+    // Safety check: If the turn remains on a player who is already out (e.g., 8-cut win),
+    // force the turn to advance to the next active player.
+    const currentPlayerId = room.turnOrder[room.currentPlayerIndex];
+    if (currentPlayerId && room.phase === 'playing') {
+      const currentPlayer = room.players.find(p => p.id === currentPlayerId);
+      if (currentPlayer?.isOut) {
+        GameEngine.advanceTurn(room);
+      }
+    }
   }
 
   /**
@@ -836,6 +846,7 @@ export class GameEngine {
       room.pendingEffect = room.deferredEffect;
       room.deferredEffect = null;
       room.phase = 'effectPhase';
+      return { success: true };
     } else {
       room.phase = 'playing';
     }
