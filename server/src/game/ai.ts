@@ -262,13 +262,19 @@ export class AIEngine {
     
     activeAIs.forEach(async ai => {
       if (room.doubtSkippers.includes(ai.id) || room.doubtDeclarers.includes(ai.id)) return;
+      
+      if (this.thinkingPlayers.has(ai.id)) return;
+      this.thinkingPlayers.add(ai.id);
 
       const thinkingTime = Math.floor(Math.random() * (room.rules.doubtTime * 1000 * 0.5)) + 1000;
       const stateVector = this.getStateVector(room, ai);
 
       setTimeout(async () => {
         try {
-          if (room.phase !== 'doubtPhase') return;
+          if (room.phase !== 'doubtPhase') {
+            this.thinkingPlayers.delete(ai.id);
+            return;
+          }
 
           let willDoubt = false;
           if (session) {
@@ -286,13 +292,16 @@ export class AIEngine {
 
           if (willDoubt) {
             const success = DoubtManager.registerDoubt(room, ai.id);
+            this.thinkingPlayers.delete(ai.id);
             if (success) onDoubtDeclared(ai.id);
           } else {
             const isAllResolved = DoubtManager.registerSkip(room, ai.id);
+            this.thinkingPlayers.delete(ai.id);
             if (isAllResolved) onDoubtResolved();
           }
         } catch (err) {
           console.error(`AI Logic [${ai.name}]: Error in runDoubtDecision timeout:`, err);
+          this.thinkingPlayers.delete(ai.id);
           // Fallback skip to avoid freeze
           const isAllResolved = DoubtManager.registerSkip(room, ai.id);
           if (isAllResolved) onDoubtResolved();
@@ -312,6 +321,9 @@ export class AIEngine {
     const player = room.players.find(p => p.id === actorId);
     if (!player || !player.isAI || player.isOut) return;
 
+    if (this.thinkingPlayers.has(actorId)) return;
+    this.thinkingPlayers.add(actorId);
+
     let session: ort.InferenceSession | null = null;
     try {
       session = await this.getSession();
@@ -323,7 +335,10 @@ export class AIEngine {
 
     setTimeout(async () => {
       try {
-        if (room.phase !== 'counterPhase' || room.counterActorIndex === null || room.turnOrder[room.counterActorIndex] !== actorId) return;
+        if (room.phase !== 'counterPhase' || room.counterActorIndex === null || room.turnOrder[room.counterActorIndex] !== actorId) {
+          this.thinkingPlayers.delete(actorId);
+          return;
+        }
 
         let willCounter = false;
         if (session) {
@@ -354,16 +369,19 @@ export class AIEngine {
 
         if (counterCards.length > 0) {
           const result = GameEngine.declareCounter(room, actorId, counterCards.map(c => c.id));
+          this.thinkingPlayers.delete(actorId);
           if (result.success) {
             onCounterDeclared(actorId);
           } else {
             onSkipCounter();
           }
         } else {
+          this.thinkingPlayers.delete(actorId);
           onSkipCounter();
         }
       } catch (err) {
         console.error(`AI Logic [${player.name}]: Error in runCounterDecision timeout:`, err);
+        this.thinkingPlayers.delete(actorId);
         onSkipCounter();
       }
     }, thinkingTime);
