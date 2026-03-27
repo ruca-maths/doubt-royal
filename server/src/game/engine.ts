@@ -185,10 +185,12 @@ export class GameEngine {
 
     room.passCount++;
 
-    this.advanceTurn(room);
-
+    // Add pass turn log
     GameEngine.addLog(room, 'pass', playerId);
-
+    
+    // Safety check for next turn
+    console.log(`[PassTurn] Player ${playerId} passed. Advance...`);
+    this.advanceTurn(room);
     return { success: true };
   }
 
@@ -199,6 +201,7 @@ export class GameEngine {
     const total = room.turnOrder.length;
     let attempts = 0;
 
+    console.log(`[Turn Advance] CurrentIndex ${room.currentPlayerIndex} -> Looking for next...`);
     do {
       room.currentPlayerIndex = ((room.currentPlayerIndex + room.rules.direction) % total + total) % total;
       attempts++;
@@ -207,26 +210,27 @@ export class GameEngine {
       const nextPlayer = room.players.find(p => p.id === room.turnOrder[room.currentPlayerIndex]);
       if (!nextPlayer) continue;
 
-      // Skip eliminated players
-      if (nextPlayer.isOut) continue;
-
-      // Skip players marked as skipped
+      if (nextPlayer.isOut) {
+        console.log(`[Turn Advance] Skip ${nextPlayer.name} (isOut)`);
+        continue;
+      }
       if (nextPlayer.isSkipped) {
+        console.log(`[Turn Advance] Skip ${nextPlayer.name} (isSkipped)`);
         nextPlayer.isSkipped = false;
         continue;
       }
 
+      console.log(`[Turn Advance] Next turn is ${nextPlayer.name} (ID: ${nextPlayer.id})`);
       break;
     } while (true);
 
-    // If the turn has come back to the player who last played cards,
-    // OR if everyone else has passed, clear the field.
     const activePlayers = room.players.filter(p => !p.isOut);
     const nextPlayerId = room.turnOrder[room.currentPlayerIndex];
     const isBackToLastPlayer = room.field.lastPlayerId && nextPlayerId === room.field.lastPlayerId;
     const isEveryonePassed = room.passCount >= activePlayers.length - 1 && room.field.lastPlayerId !== null;
 
     if (isBackToLastPlayer || isEveryonePassed) {
+      console.log(`[Field Clear] Reason: ${isBackToLastPlayer ? 'BackToLead' : 'EveryonePassed'}`);
       clearField(room);
       room.passCount = 0;
     }

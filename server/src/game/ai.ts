@@ -122,6 +122,13 @@ export class AIEngine {
         
         console.log(`AI Logic [${player.name}]: Final action:`, action.type, action.declaredNumber || '');
 
+        // Lead player guard: cannot pass on empty field
+        const isFieldEmpty = room.field.currentCards.length === 0 || room.field.lastPlayerId === null || room.field.lastPlayerId === player.id;
+        if (action.type === 'pass' && isFieldEmpty && player.hand.length > 0) {
+          console.warn(`AI Logic [${player.name}]: Lead player tried to pass on empty field. Forcing heuristic play.`);
+          action = this.decidePlayActionHeuristic(room, player);
+        }
+
         if (action.type === 'pass') {
           const result = GameEngine.passTurn(room, playerId);
           wrappedOnAction('pass', result);
@@ -129,7 +136,7 @@ export class AIEngine {
           const result = GameEngine.playCards(room, playerId, action.cards.map(c => c.id), action.declaredNumber!);
           wrappedOnAction('play', result);
         } else {
-          // Fallback pass to prevent freeze
+          // Fallback pass to prevent freeze (unless lead player, already guarded above)
           console.warn(`AI Logic [${player.name}]: Invalid action state. Forcing pass.`);
           const result = GameEngine.passTurn(room, playerId);
           wrappedOnAction('pass', result);
@@ -138,11 +145,11 @@ export class AIEngine {
         console.error(`AI Logic [${player.name}]: CRITICAL ERROR in runPlayTurn:`, err);
         // Ensure the game doesn't freeze
         try {
+          this.thinkingPlayers.delete(playerId);
           const result = GameEngine.passTurn(room, playerId);
-          wrappedOnAction('pass', result);
+          onAction('pass', result); // Use direct onAction here as wrapped might double-delete
         } catch (innerErr) {
           console.error("Failed to even pass turn after AI error:", innerErr);
-          this.thinkingPlayers.delete(playerId);
         }
       }
     }, thinkingTime);
@@ -436,6 +443,15 @@ export class AIEngine {
           if (validation.valid) return { type: 'play', cards: selectedCards, declaredNumber: num };
         }
       }
+      
+      // Safety: If somehow we reach here on an empty field, we MUST play something.
+      // This is a double-insurance.
+      if (isFieldEmpty && player.hand.length > 0) {
+        const firstCard = player.hand[0];
+        const num = firstCard.isJoker ? 0 : firstCard.number;
+        return { type: 'play', cards: [firstCard], declaredNumber: num };
+      }
+
       return { type: 'pass' };
     }
   }

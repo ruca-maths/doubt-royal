@@ -322,13 +322,8 @@ function broadcastGameState(io: Server, room: import('../game/types').Room): voi
   // Trigger AI effect decisions if applicable
   if (room.phase === 'effectPhase') {
     AIEngine.runEffectDecision(room, () => {
-      if (room.phase === 'doubtPhase') {
-        startDoubtTimer(io, room);
-      } else if (room.phase === 'counterPhase') {
-        startCounterTimer(io, room);
-      } else {
-        broadcastGameState(io, room);
-      }
+      console.log(`AI Effect decision made. Syncing...`);
+      broadcastGameState(io, room);
     });
   }
 
@@ -338,21 +333,26 @@ function broadcastGameState(io: Server, room: import('../game/types').Room): voi
     const currentPlayer = room.players.find(p => p.id === currentPlayerId);
     if (currentPlayer && currentPlayer.isAI && !currentPlayer.isOut) {
       AIEngine.runPlayTurn(room, currentPlayerId, (actionType, result) => {
+        console.log(`[AI Decision] ${currentPlayer.name} chose ${actionType.toUpperCase()}`);
         if (actionType === 'play' && result && result.success) {
           // If game ended
           if (room.phase === 'result') {
+            console.log(`[Game End] AI finished game. Syncing...`);
             broadcastGameState(io, room);
             return;
           }
 
           // Start doubt phase (unless explicitly skipped)
           if (!result.skipDoubt && room.phase === 'doubtPhase') {
+            console.log(`[Phase Sync] Starting doubt timer for AI play.`);
             startDoubtTimer(io, room);
           } else {
+            console.log(`[Phase Sync] Doubt skipped. Next turn.`);
             broadcastGameState(io, room);
           }
         } else {
           // Pass or Error
+          console.log(`[AI Pass/Error] Syncing state.`);
           broadcastGameState(io, room);
         }
       });
@@ -452,8 +452,15 @@ function startDoubtTimer(io: Server, room: import('../game/types').Room): void {
   
   AIEngine.runDoubtDecision(
     room, 
-    (playerId) => { io.to(room.id).emit('doubt-declared', { playerId }); },
-    () => { resolveAndBroadcastDoubt(io, room); }
+    (playerId) => { 
+      const name = room.players.find(p => p.id === playerId)?.name;
+      console.log(`[AI Doubt] ${name} declared doubt.`);
+      io.to(room.id).emit('doubt-declared', { playerId }); 
+    },
+    () => { 
+      console.log(`[AI Doubt] All AI skipped/resolved. Syncing...`);
+      resolveAndBroadcastDoubt(io, room); 
+    }
   );
   
   broadcastGameState(io, room);

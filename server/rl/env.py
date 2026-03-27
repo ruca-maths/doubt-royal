@@ -1,23 +1,16 @@
-# Google Colab で実行するための Doubt Royale 強化学習統合スクリプト (Phase 2: 高度な強化版)
-
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import random
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-from collections import deque
-import time
-import copy
 
-# --- 1. 環境の定義 (報酬設計を強化) ---
 class DoubtRoyaleEnv(gym.Env):
+    metadata = {"render_modes": ["human"]}
+
     def __init__(self, num_players=4, opponent_policies=None):
         super(DoubtRoyaleEnv, self).__init__()
         self.num_players = num_players
-        self.opponent_policies = opponent_policies # 自己対戦用
+        self.opponent_policies = opponent_policies
+        
         self.observation_space = spaces.Dict({
             "hand": spaces.Box(low=0, high=1, shape=(54,), dtype=np.int32),
             "field": spaces.Box(low=0, high=13, shape=(3,), dtype=np.int32),
@@ -39,7 +32,6 @@ class DoubtRoyaleEnv(gym.Env):
         self.is_eleven_back = False
         self.player_lives = [3] * self.num_players
         self.player_out = [False] * self.num_players
-        self.pass_count = 0
         return self._get_obs(0), {}
 
     def _create_deck(self):
@@ -54,7 +46,6 @@ class DoubtRoyaleEnv(gym.Env):
     def _get_obs(self, player_idx):
         hand_vec = np.zeros(54, dtype=np.int32)
         for card in self.hands[player_idx]:
-            # ID parse
             idx = int(card["id"].split("-")[1])
             if 0 <= idx < 54: hand_vec[idx] = 1
         
@@ -74,30 +65,25 @@ class DoubtRoyaleEnv(gym.Env):
         }
 
     def step(self, action):
-        # アクション実行前の手札枚数
         initial_hand_size = len(self.hands[0])
-        
         terminated = False
         reward = 0
         
-        # 0: Pass, 1-13: Honest Play, 14: Doubt, 15: Counter, 16-28: Lie
         if action == 0:
             self._handle_pass(0)
         elif 1 <= action <= 13:
             played = self._handle_play(0, action, lie=False)
-            if played: reward += 0.2 # カードを出せたらプラス評価
+            if played: reward += 0.2
         elif action == 14:
             success = self._handle_doubt(0)
-            if success: reward += 1.0 # ダウト成功ボーナス
-            else: reward -= 1.0       # ダウト失敗ペナルティ
+            if success: reward += 1.0
+            else: reward -= 1.0
         elif 16 <= action <= 28:
             played = self._handle_play(0, action - 15, lie=True)
-            if played: reward += 0.1 # ブラフを仕掛けられたら微量加算
+            if played: reward += 0.1
         
-        # 他のプレイヤーをシミュレーション（自己対戦モデルがあれば使用）
         self._simulate_others()
 
-        # 終了判定と勝利報酬
         if len(self.hands[0]) == 0 and not self.player_out[0]:
             reward += 10.0
             terminated = True
@@ -110,11 +96,10 @@ class DoubtRoyaleEnv(gym.Env):
     def _handle_play(self, player_idx, declared_num, lie=False):
         hand = self.hands[player_idx]
         if not hand: return False
-        
         cards_to_play = []
         if not lie:
             cards_to_play = [c for c in hand if (0 if c["is_joker"] else c["number"]) == declared_num]
-            if not cards_to_play: cards_to_play = [hand[0]] # 強制嘘
+            if not cards_to_play: cards_to_play = [hand[0]]
         else:
             others = [c for c in hand if (0 if c["is_joker"] else c["number"]) != declared_num]
             cards_to_play = [others[0]] if others else [hand[0]]
@@ -133,21 +118,20 @@ class DoubtRoyaleEnv(gym.Env):
         if self.field["last_player"] in [-1, player_idx]: return False
         liar_idx = self.field["last_player"]
         is_lie = any((0 if c["is_joker"] else c["number"]) != self.field["number"] for c in self.field["cards"])
-        
         if is_lie:
             self.hands[liar_idx].extend(self.field["cards"])
             self.player_lives[liar_idx] -= 1
-            res = (player_idx == 0) # Agent success
+            res = (player_idx == 0)
         else:
             self.hands[player_idx].extend(self.field["cards"])
             self.player_lives[player_idx] -= 1
-            res = (player_idx != 0) # Agent failed
-            
+            res = (player_idx != 0)
         self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
         return res
 
     def _simulate_others(self):
         steps = 0
+        import torch
         while self.current_player != 0 and not all(self.player_out) and steps < 100:
             steps += 1
             p_idx = self.current_player
@@ -156,21 +140,17 @@ class DoubtRoyaleEnv(gym.Env):
                 self.current_player = (self.current_player + 1) % self.num_players
                 continue
 
-            # 自己対戦モデルがあれば、それを使って行動を決定
             if self.opponent_policies and p_idx < len(self.opponent_policies):
                 policy = self.opponent_policies[p_idx]
                 with torch.no_grad():
                     obs = self._get_obs(p_idx)
                     flat_obs = np.concatenate([obs["hand"], obs["field"], obs["others_count"], obs["status"]])
                     action = torch.argmax(policy(torch.FloatTensor(flat_obs))).item()
-                
-                # 行動実行
                 if action == 0: self._handle_pass(p_idx)
                 elif 1 <= action <= 13: self._handle_play(p_idx, action, lie=False)
                 elif action == 14: self._handle_doubt(p_idx)
                 elif 16 <= action <= 28: self._handle_play(p_idx, action-15, lie=True)
             else:
-                # 従来のヘイリスティックAI
                 r = random.random()
                 if r < 0.7:
                     possible_nums = list(set([(0 if c["is_joker"] else c["number"]) for c in self.hands[p_idx]]))
@@ -178,101 +158,3 @@ class DoubtRoyaleEnv(gym.Env):
                 elif r < 0.85: self._handle_play(p_idx, random.randint(1, 13), lie=True)
                 elif r < 0.95: self._handle_pass(p_idx)
                 else: self._handle_doubt(p_idx)
-
-# --- 2. モデルの定義 (少し大きくする) ---
-class DQN(nn.Module):
-    def __init__(self, n_actions):
-        super(DQN, self).__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(62, 256), nn.ReLU(),
-            nn.Linear(256, 256), nn.ReLU(),
-            nn.Linear(256, n_actions)
-        )
-    def forward(self, x): return self.fc(x)
-
-# --- 3. 自己対戦を含む学習ループ ---
-def train_colab_phase2():
-    num_episodes = 50000 # 5万回学習 (Colabならこれくらいは可能)
-    batch_size = 128
-    gamma = 0.99
-    epsilon = 1.0
-    eps_min = 0.05
-    eps_decay = 0.9999 # ゆっくり探索を減らす
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
-    env = DoubtRoyaleEnv()
-    n_actions = env.action_space.n
-    policy_net = DQN(n_actions).to(device)
-    target_net = DQN(n_actions).to(device)
-    target_net.load_state_dict(policy_net.state_dict())
-    optimizer = optim.Adam(policy_net.parameters(), lr=5e-4) # 学習率を少し下げる
-    memory = deque(maxlen=20000)
-    
-    # 自己対戦用の対戦相手プール
-    pool = deque(maxlen=5) # 直近5つのモデルを保存
-    
-    for episode in range(num_episodes):
-        # 自己対戦相手のサンプリング
-        opponents = None
-        if len(pool) > 0:
-            opponents = [random.choice(pool) for _ in range(env.num_players)]
-            env.opponent_policies = opponents
-
-        state, _ = env.reset()
-        total_reward = 0
-        
-        while True:
-            # Action Selection
-            if random.random() < epsilon: action = random.randint(0, n_actions - 1)
-            else:
-                with torch.no_grad():
-                    flat_state = np.concatenate([state["hand"], state["field"], state["others_count"], state["status"]])
-                    state_t = torch.FloatTensor(flat_state).to(device)
-                    action = torch.argmax(policy_net(state_t)).item()
-            
-            next_state, reward, done, _, _ = env.step(action)
-            memory.append((state, action, reward, next_state, done))
-            
-            # Training Step
-            if len(memory) > batch_size:
-                batch = random.sample(memory, batch_size)
-                s_batch = torch.FloatTensor([np.concatenate([s["hand"], s["field"], s["others_count"], s["status"]]) for s, a, r, ns, d in batch]).to(device)
-                ns_batch = torch.FloatTensor([np.concatenate([ns["hand"], ns["field"], ns["others_count"], ns["status"]]) for s, a, r, ns, d in batch]).to(device)
-                a_batch = torch.LongTensor([a for s, a, r, ns, d in batch]).unsqueeze(1).to(device)
-                r_batch = torch.FloatTensor([r for s, a, r, ns, d in batch]).to(device)
-                d_batch = torch.BoolTensor([d for s, a, r, ns, d in batch]).to(device)
-                
-                q_vals = policy_net(s_batch).gather(1, a_batch).squeeze()
-                next_q = target_net(ns_batch).max(1)[0]
-                next_q[d_batch] = 0.0
-                expected_q = r_batch + gamma * next_q
-                loss = F.mse_loss(q_vals, expected_q)
-                optimizer.zero_grad(); loss.backward(); optimizer.step()
-
-            state = next_state
-            total_reward += reward
-            if done: break
-            
-        epsilon = max(eps_min, epsilon * eps_decay)
-        
-        if episode % 100 == 0:
-            print(f"Episode {episode}, Reward: {total_reward:.2f}, Epsilon: {epsilon:.2f}")
-            target_net.load_state_dict(policy_net.state_dict())
-            
-        # 1000回ごとにモデルをプールに追加（自己対戦相手の更新）
-        if episode > 0 and episode % 2000 == 0:
-            new_opponent = DQN(n_actions).to(device)
-            new_opponent.load_state_dict(policy_net.state_dict())
-            pool.append(new_opponent)
-            print(f"--- Added current model to self-play pool (Pool size: {len(pool)}) ---")
-
-    # ONNX 出力
-    print("Exporting to ONNX...")
-    dummy_input = torch.randn(1, 62).to(device)
-    torch.onnx.export(policy_net.to("cpu"), dummy_input.to("cpu"), "doubt_royale_model_v2.onnx", input_names=['input'], output_names=['output'])
-    print("Done! doubt_royale_model_v2.onnx をダウンロードしてください。")
-
-if __name__ == "__main__":
-    train_colab_phase2()
