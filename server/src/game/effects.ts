@@ -145,8 +145,12 @@ export function moveCardsToGrave(room: Room, cards: Card[]): void {
 export function clearField(room: Room): void {
   // Move current cards to appropriate grave
   moveCardsToGrave(room, room.field.currentCards);
-
   room.field.currentCards = [];
+
+  // Also move any revealed cards in history to face-up pool (Phase 14 fix)
+  const revealedInHistory = room.field.cardHistory.filter(c => c.isFaceUp);
+  room.field.faceUpPool.push(...revealedInHistory);
+  room.field.cardHistory = room.field.cardHistory.filter(c => !c.isFaceUp);
   room.field.declaredNumber = 0;
   room.field.lastPlayerId = null;
   room.field.doubtType = null;

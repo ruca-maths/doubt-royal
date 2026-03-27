@@ -318,10 +318,10 @@ export class GameEngine {
       }
       return;
     } else if (result.type === 'success') {
-      GameEngine.addLog(room, 'doubtSuccess', result.doubterId, { revealedCards: result.revealedCards });
-      
-      // Move the liar's revealed cards to face-up graveyard (Standard + Req 4)
-      room.field.faceUpPool.push(...result.revealedCards);
+      // Move the liar's revealed cards to cardHistory with face-up flag (Phase 14 fix)
+      // They will remain on the field until clearField moves them to faceUpPool
+      result.revealedCards.forEach(c => { c.isFaceUp = true; });
+      room.field.cardHistory.push(...result.revealedCards);
 
       // Phase 14: Liar's cards NOT returned to hand (Requirement 5)
       // (The block that returned them to hand has been removed)
@@ -938,7 +938,10 @@ export class GameEngine {
         doubtType: room.field.doubtType,
         counteredBy: room.field.counteredBy,
         pendingNumbers: room.field.pendingNumbers,
-        revealedCards: room.field.currentCards.filter(c => c.isFaceUp),
+        revealedCards: [
+          ...room.field.currentCards.filter(c => c.isFaceUp),
+          ...room.field.cardHistory.filter(c => c.isFaceUp)
+        ],
         hasFieldCleared: room.field.hasFieldCleared,
         isEffectActive: (
           room.field.declaredNumber === 12 ? room.field.hasFieldCleared :
