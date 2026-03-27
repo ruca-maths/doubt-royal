@@ -6,18 +6,24 @@ import os
 class DQN(nn.Module):
     def __init__(self, n_actions):
         super(DQN, self).__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(62, 256), nn.ReLU(),
-            nn.Linear(256, 256), nn.ReLU(),
-            nn.Linear(256, n_actions)
-        )
-    def forward(self, x): return self.fc(x)
+        self.fc1 = nn.Linear(62, 128)
+        self.lstm = nn.LSTM(128, 128, batch_first=True)
+        self.fc2 = nn.Linear(128, n_actions)
+
+    def forward(self, x):
+        # x is (batch, 62)
+        if x.dim() == 2:
+            x = x.unsqueeze(1) # (batch, 1, 62)
+        x = torch.relu(self.fc1(x))
+        x, _ = self.lstm(x)
+        x = self.fc2(x.squeeze(1)) # (batch, n_actions)
+        return x
 
 def export():
     n_actions = 29
     model = DQN(n_actions)
     
-    pth_path = "policy_net_latest.pth"
+    pth_path = "drqn_policy_latest.pth"
     if not os.path.exists(pth_path):
         print(f"Error: {pth_path} not found.")
         return
