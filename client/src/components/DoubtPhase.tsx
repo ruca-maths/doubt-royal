@@ -149,6 +149,10 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
                 ? `${lastPlayerName} のカウンターに対するダウト確認` 
                 : `${lastPlayerName} が ${gameState.field.currentCardCount}枚${isDiscard ? '捨てた' : '出した'}`)}
         </p>
+        
+        <div className="text-4xl font-black mb-1 text-game-accent-light" style={{ fontFamily: 'Orbitron, sans-serif' }}>
+          {isCounterPhase ? : `宣言: ${getDeclaredNumberDisplay(declaredNum)}`}
+        </div>
         {pendingNumbers && (
           <div className="bg-game-danger/20 border border-game-danger/30 rounded-lg p-2 mb-4">
             <p className="text-game-danger text-sm font-bold">
