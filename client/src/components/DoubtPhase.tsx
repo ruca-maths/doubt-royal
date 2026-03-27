@@ -151,7 +151,7 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
         </p>
         
         <div className="text-4xl font-black mb-1 text-game-accent-light" style={{ fontFamily: 'Orbitron, sans-serif' }}>
-          {isCounterPhase ? : `宣言: ${getDeclaredNumberDisplay(declaredNum)}`}
+          {isCounterPhase ? '待機中' : `宣言: ${getDeclaredNumberDisplay(declaredNum)}`}
         </div>
         {pendingNumbers && (
           <div className="bg-game-danger/20 border border-game-danger/30 rounded-lg p-2 mb-4">
