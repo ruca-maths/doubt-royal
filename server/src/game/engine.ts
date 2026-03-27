@@ -277,6 +277,7 @@ export class GameEngine {
             playerId: result.countererId,
             count: result.count,
             targetPlayerId: result.doubterId,
+            isCounterLead: true, // Tag to retain lead after penalty
           };
           room.phase = 'effectPhase';
         } else {
@@ -307,6 +308,7 @@ export class GameEngine {
           playerId: result.countererId,
           count: result.count,
           targetPlayerId: result.doubterId,
+          isCounterLead: true, // Tag to retain lead after penalty
         };
         room.phase = 'effectPhase';
       } else {
@@ -888,10 +890,14 @@ export class GameEngine {
       return { success: true };
     }
 
-    if (clearAfter) { // Legacy flag, just in case
-        clearField(room);
+    // Phase 7 fix: If this was a counter lead (e.g., honest counter was doubted),
+    // do NOT advance turn. The counterer retains the lead.
+    const isCounterLead = effect.isCounterLead;
+    if (isCounterLead) {
+      console.log(`[Turn Sync] Counter-leader ${playerId} retains lead. Skipping advanceTurn.`);
+      return { success: true };
     }
-    
+
     // Phase 6 fix: Advance turn for all effect types EXCEPT queenBomber 
     // (which transitions to doubtPhase instead of ending the turn).
     // queenBomber returns early above, so this covers all remaining types.

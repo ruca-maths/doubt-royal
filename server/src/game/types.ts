@@ -64,6 +64,7 @@ export interface PendingEffect {
   count: number;       // how many cards to select/discard
   targetPlayerId?: string; // who receives the cards (for doubt success/failure or 7-pass)
   isFromDoubtSuccess?: boolean;
+  isCounterLead?: boolean;
 }
 
 // ===== Timeline Logs =====
