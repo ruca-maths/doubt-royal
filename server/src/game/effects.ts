@@ -102,13 +102,20 @@ function applySkipAndCheckLoop(room: Room, playerId: string, count: number): boo
   const playerIdx = room.turnOrder.indexOf(playerId);
   const dir = room.rules.direction;
   const total = room.turnOrder.length;
+  let currentIdx = playerIdx;
+  let skippedCount = 0;
+  
+  while (skippedCount < count) {
+    currentIdx = ((currentIdx + dir) % total + total) % total;
+    const skipPlayerId = room.turnOrder[currentIdx];
+    
+    // Stop if we looped back to the original player (safety)
+    if (skipPlayerId === playerId) break;
 
-  for (let i = 1; i <= count; i++) {
-    const skipIdx = ((playerIdx + dir * i) % total + total) % total;
-    const skipPlayerId = room.turnOrder[skipIdx];
     const player = room.players.find(p => p.id === skipPlayerId);
     if (player && !player.isOut) {
       player.isSkipped = true;
+      skippedCount++;
     }
   }
 

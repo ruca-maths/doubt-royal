@@ -10,6 +10,11 @@ export class AIEngine {
   private static session: ort.InferenceSession | null = null;
   private static sessionPromise: Promise<ort.InferenceSession | null> | null = null;
 
+  static clearThinkingPlayers(): void {
+    console.log('[AI Engine] Clearing thinking players guard.');
+    this.thinkingPlayers.clear();
+  }
+
   private static getModelPath(): string {
     const cwd = process.cwd();
     const pathsToTry = [

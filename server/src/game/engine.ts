@@ -24,6 +24,8 @@ export class GameEngine {
       player.isOut = false;
     });
 
+    AIEngine.clearThinkingPlayers();
+
     room.phase = 'playing';
     room.field = {
       currentCards: [],
@@ -1031,6 +1033,7 @@ export class GameEngine {
     }
     
     room.phase = 'result';
+    AIEngine.clearThinkingPlayers();
     
     // Update stats
     room.players.forEach(p => {

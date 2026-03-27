@@ -43,12 +43,15 @@ export function validatePlayCards(
     const currentStrength = getCardStrength(declaredNumber, rules);
     const prevStrength = getCardStrength(field.declaredNumber, rules);
 
+    console.log(`[Validation] Play ${declaredNumber} (Str: ${currentStrength}) vs Field ${field.declaredNumber} (Str: ${prevStrength}). Rev: ${rules.isRevolution}, 11B: ${rules.isElevenBack}`);
+
     // Joker cannot be played on Joker
     if (field.declaredNumber === 0 && declaredNumber === 0) {
       return { valid: false, reason: 'ジョーカーに対してジョーカーは出せません' };
     }
 
     if (currentStrength <= prevStrength) {
+      console.warn(`[Validation] REJECTED: Strength ${currentStrength} <= ${prevStrength}`);
       return { valid: false, reason: '場より強いカードを出してください' };
     }
   }
