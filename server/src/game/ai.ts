@@ -7,7 +7,7 @@ import path from 'path';
 
 export class AIEngine {
   private static session: ort.InferenceSession | null = null;
-  private static modelPath = path.join(process.cwd(), 'doubt_royale_model.onnx');
+  private static modelPath = path.join(process.cwd(), 'doubt_royale_model_latest.onnx');
 
   private static async getSession(): Promise<ort.InferenceSession | null> {
     if (this.session) return this.session;
