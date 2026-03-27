@@ -283,8 +283,11 @@ export function registerHandlers(io: Server): void {
 
       callback?.({ success: true });
 
+      // Start doubt phase or counter phase if needed
       if (room.phase === 'doubtPhase') {
         startDoubtTimer(io, room);
+      } else if (room.phase === 'counterPhase') {
+        startCounterTimer(io, room);
       } else {
         broadcastGameState(io, room);
       }
@@ -328,6 +331,9 @@ function broadcastGameState(io: Server, room: import('../game/types').Room): voi
       if (room.phase === 'doubtPhase') {
         console.log(`[Phase Sync] AI effect (Q-Bomber?) triggered doubt. Starting timer.`);
         startDoubtTimer(io, room);
+      } else if (room.phase === 'counterPhase') {
+        console.log(`[Phase Sync] AI effect led to counter phase. Starting counter timer.`);
+        startCounterTimer(io, room);
       } else {
         broadcastGameState(io, room);
       }
