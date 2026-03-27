@@ -184,9 +184,11 @@ export function registerHandlers(io: Server): void {
         return;
       }
 
-      // Start doubt phase (unless explicitly skipped)
+      // Start doubt phase or counter phase
       if (!result.skipDoubt && room.phase === 'doubtPhase') {
         startDoubtTimer(io, room);
+      } else if (room.phase === 'counterPhase') {
+        startCounterTimer(io, room);
       } else {
         broadcastGameState(io, room);
       }
@@ -347,12 +349,15 @@ function broadcastGameState(io: Server, room: import('../game/types').Room): voi
             return;
           }
 
-          // Start doubt phase (unless explicitly skipped)
+          // Start doubt phase or counter phase
           if (!result.skipDoubt && room.phase === 'doubtPhase') {
             console.log(`[Phase Sync] Starting doubt timer for AI play.`);
             startDoubtTimer(io, room);
+          } else if (room.phase === 'counterPhase') {
+            console.log(`[Phase Sync] Starting counter timer for AI play.`);
+            startCounterTimer(io, room);
           } else {
-            console.log(`[Phase Sync] Doubt skipped. Next turn.`);
+            console.log(`[Phase Sync] Transitions finished. Syncing.`);
             broadcastGameState(io, room);
           }
         } else {
