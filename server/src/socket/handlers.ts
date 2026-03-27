@@ -322,8 +322,13 @@ function broadcastGameState(io: Server, room: import('../game/types').Room): voi
   // Trigger AI effect decisions if applicable
   if (room.phase === 'effectPhase') {
     AIEngine.runEffectDecision(room, () => {
-      console.log(`AI Effect decision made. Syncing...`);
-      broadcastGameState(io, room);
+      console.log(`AI Effect decision made. Current phase: ${room.phase}`);
+      if (room.phase === 'doubtPhase') {
+        console.log(`[Phase Sync] AI effect (Q-Bomber?) triggered doubt. Starting timer.`);
+        startDoubtTimer(io, room);
+      } else {
+        broadcastGameState(io, room);
+      }
     });
   }
 
