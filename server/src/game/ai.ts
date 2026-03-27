@@ -7,18 +7,26 @@ import path from 'path';
 
 export class AIEngine {
   private static session: ort.InferenceSession | null = null;
+  private static sessionPromise: Promise<ort.InferenceSession | null> | null = null;
   private static modelPath = path.join(process.cwd(), 'doubt_royale_model_latest.onnx');
 
   private static async getSession(): Promise<ort.InferenceSession | null> {
     if (this.session) return this.session;
-    try {
-      this.session = await ort.InferenceSession.create(this.modelPath);
-      console.log('AI Logic: RL Model loaded successfully.');
-      return this.session;
-    } catch (e) {
-      console.error('AI Logic: Failed to load RL Model, using heuristics.', e);
-      return null;
-    }
+    if (this.sessionPromise) return this.sessionPromise;
+
+    this.sessionPromise = (async () => {
+      try {
+        console.log(`AI Logic: Loading RL Model from ${this.modelPath}...`);
+        this.session = await ort.InferenceSession.create(this.modelPath);
+        console.log('AI Logic: RL Model loaded successfully.');
+        return this.session;
+      } catch (e) {
+        console.error('AI Logic: Failed to load RL Model, using heuristics.', e);
+        return null;
+      }
+    })();
+
+    return this.sessionPromise;
   }
 
   static async runPlayTurn(
@@ -29,45 +37,84 @@ export class AIEngine {
     const player = room.players.find(p => p.id === playerId);
     if (!player || player.isOut) return;
 
-    const session = await this.getSession();
+    let session: ort.InferenceSession | null = null;
+    try {
+      session = await this.getSession();
+    } catch (err) {
+      console.error(`AI Logic [${player.name}]: Failed to get session, falling back to heuristic.`, err);
+    }
     const stateVector = this.getStateVector(room, player);
     
     // Simulate thinking time (1-3 seconds)
     const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
     
     setTimeout(async () => {
-      // Re-check game state after timeout
-      if (room.phase !== 'playing' || room.turnOrder[room.currentPlayerIndex] !== playerId) return;
-      
-      let action: { type: 'play' | 'pass', cards?: Card[], declaredNumber?: number };
+      try {
+        // Re-check game state after timeout
+        if (room.phase !== 'playing' || room.turnOrder[room.currentPlayerIndex] !== playerId) {
+          console.log(`AI Logic [${player.name}]: Phase changed or not my turn. Skipping.`);
+          return;
+        }
+        
+        console.log(`AI Logic [${player.name}]: Thinking finished. Deciding action...`);
+        let action: { type: 'play' | 'pass', cards?: Card[], declaredNumber?: number };
 
-      if (session) {
-        const result = await this.predict(session, stateVector);
-        action = this.mapActionToGame(room, player, result);
-      } else {
-        action = this.decidePlayActionHeuristic(room, player);
-      }
-      
-      if (action.type === 'pass') {
-        const result = GameEngine.passTurn(room, playerId);
-        onAction('pass', result);
-      } else if (action.type === 'play' && action.cards) {
-        const result = GameEngine.playCards(room, playerId, action.cards.map(c => c.id), action.declaredNumber!);
-        onAction('play', result);
+        if (session) {
+          try {
+            const result = await this.predict(session, stateVector);
+            console.log(`AI Logic [${player.name}]: Model predicted action index ${result}`);
+            action = this.mapActionToGame(room, player, result);
+          } catch (e) {
+            console.error(`AI Logic [${player.name}]: Prediction failed, falling back to heuristic.`, e);
+            action = this.decidePlayActionHeuristic(room, player);
+          }
+        } else {
+          console.log(`AI Logic [${player.name}]: Using heuristic (No model session).`);
+          action = this.decidePlayActionHeuristic(room, player);
+        }
+        
+        console.log(`AI Logic [${player.name}]: Final action:`, action.type, action.declaredNumber || '');
+
+        if (action.type === 'pass') {
+          const result = GameEngine.passTurn(room, playerId);
+          onAction('pass', result);
+        } else if (action.type === 'play' && action.cards) {
+          const result = GameEngine.playCards(room, playerId, action.cards.map(c => c.id), action.declaredNumber!);
+          onAction('play', result);
+        } else {
+          // Fallback pass to prevent freeze
+          console.warn(`AI Logic [${player.name}]: Invalid action state. Forcing pass.`);
+          const result = GameEngine.passTurn(room, playerId);
+          onAction('pass', result);
+        }
+      } catch (err) {
+        console.error(`AI Logic [${player.name}]: CRITICAL ERROR in runPlayTurn:`, err);
+        // Ensure the game doesn't freeze
+        try {
+          const result = GameEngine.passTurn(room, playerId);
+          onAction('pass', result);
+        } catch (innerErr) {
+          console.error("Failed to even pass turn after AI error:", innerErr);
+        }
       }
     }, thinkingTime);
   }
 
   private static async predict(session: ort.InferenceSession, state: number[]): Promise<number> {
-    const input = new ort.Tensor('float32', new Float32Array(state), [1, 62]);
-    const results = await session.run({ input });
-    const output = results.output.data as Float32Array;
-    // Get index of max value
-    let maxIdx = 0;
-    for (let i = 1; i < output.length; i++) {
-        if (output[i] > output[maxIdx]) maxIdx = i;
+    try {
+      const input = new ort.Tensor('float32', new Float32Array(state), [1, 62]);
+      const results = await session.run({ input });
+      const output = results.output.data as Float32Array;
+      // Get index of max value
+      let maxIdx = 0;
+      for (let i = 1; i < output.length; i++) {
+          if (output[i] > output[maxIdx]) maxIdx = i;
+      }
+      return maxIdx;
+    } catch (e) {
+      console.error('Inference error in predict:', e);
+      throw e;
     }
-    return maxIdx;
   }
 
   private static mapActionToGame(room: Room, player: Player, modelAction: number): { type: 'play' | 'pass', cards?: Card[], declaredNumber?: number } {
@@ -156,7 +203,13 @@ export class AIEngine {
   static async runDoubtDecision(room: Room, onDoubtDeclared: (playerId: string) => void, onDoubtResolved: () => void): Promise<void> {
     if (room.phase !== 'doubtPhase') return;
 
-    const session = await this.getSession();
+    let session: ort.InferenceSession | null = null;
+    try {
+      session = await this.getSession();
+    } catch (err) {
+      console.error('AI Logic: Failed to get session for doubt decision.', err);
+    }
+    
     const activeAIs = room.players.filter(p => p.isAI && !p.isOut && p.id !== room.field.lastPlayerId);
     
     activeAIs.forEach(async ai => {
@@ -166,20 +219,33 @@ export class AIEngine {
       const stateVector = this.getStateVector(room, ai);
 
       setTimeout(async () => {
-        if (room.phase !== 'doubtPhase') return;
+        try {
+          if (room.phase !== 'doubtPhase') return;
 
-        let willDoubt = false;
-        if (session) {
-            const action = await this.predict(session, stateVector);
-            willDoubt = (action === 14); // 14: Doubt
-        } else {
+          let willDoubt = false;
+          if (session) {
+            try {
+              const action = await this.predict(session, stateVector);
+              willDoubt = (action === 14); // 14: Doubt
+              console.log(`AI Logic [${ai.name}]: Doubt decision: ${willDoubt ? 'DOUBT' : 'SKIP'} (action index: ${action})`);
+            } catch (e) {
+              console.error(`AI Logic [${ai.name}]: Prediction for doubt failed.`, e);
+              willDoubt = Math.random() < 0.1;
+            }
+          } else {
             willDoubt = Math.random() < 0.1;
-        }
+          }
 
-        if (willDoubt) {
-          const success = DoubtManager.registerDoubt(room, ai.id);
-          if (success) onDoubtDeclared(ai.id);
-        } else {
+          if (willDoubt) {
+            const success = DoubtManager.registerDoubt(room, ai.id);
+            if (success) onDoubtDeclared(ai.id);
+          } else {
+            const isAllResolved = DoubtManager.registerSkip(room, ai.id);
+            if (isAllResolved) onDoubtResolved();
+          }
+        } catch (err) {
+          console.error(`AI Logic [${ai.name}]: Error in runDoubtDecision timeout:`, err);
+          // Fallback skip to avoid freeze
           const isAllResolved = DoubtManager.registerSkip(room, ai.id);
           if (isAllResolved) onDoubtResolved();
         }
@@ -198,42 +264,58 @@ export class AIEngine {
     const player = room.players.find(p => p.id === actorId);
     if (!player || !player.isAI || player.isOut) return;
 
-    const session = await this.getSession();
+    let session: ort.InferenceSession | null = null;
+    try {
+      session = await this.getSession();
+    } catch (err) {
+      console.error(`AI Logic [${player.name}]: Failed to get session for counter decision.`, err);
+    }
     const stateVector = this.getStateVector(room, player);
     const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
 
     setTimeout(async () => {
-      if (room.phase !== 'counterPhase' || room.counterActorIndex === null || room.turnOrder[room.counterActorIndex] !== actorId) return;
+      try {
+        if (room.phase !== 'counterPhase' || room.counterActorIndex === null || room.turnOrder[room.counterActorIndex] !== actorId) return;
 
-      let willCounter = false;
-      if (session) {
-        const action = await this.predict(session, stateVector);
-        willCounter = (action === 15); // 15: Counter
-      } else {
-        // Fallback heuristic: check if we have cards
-        willCounter = this.canCounterHeuristic(room, player) && Math.random() < 0.8;
-      }
+        let willCounter = false;
+        if (session) {
+          try {
+            const action = await this.predict(session, stateVector);
+            willCounter = (action === 15); // 15: Counter
+            console.log(`AI Logic [${player.name}]: Counter decision: ${willCounter ? 'COUNTER' : 'SKIP'} (action index: ${action})`);
+          } catch (e) {
+            console.error(`AI Logic [${player.name}]: Prediction for counter failed.`, e);
+            willCounter = this.canCounterHeuristic(room, player) && Math.random() < 0.8;
+          }
+        } else {
+          // Fallback heuristic: check if we have cards
+          willCounter = this.canCounterHeuristic(room, player) && Math.random() < 0.8;
+        }
 
-      let counterCards: Card[] = [];
-      if (willCounter) {
-        if (room.field.declaredNumber === 8) {
+        let counterCards: Card[] = [];
+        if (willCounter) {
+          if (room.field.declaredNumber === 8) {
             const fours = player.hand.filter(c => c.number === 4);
             const requiredCount = room.field.currentCards.length + 1;
             if (fours.length >= requiredCount) counterCards = fours.slice(0, requiredCount);
-        } else if (room.field.declaredNumber === 0 && room.field.currentCards.length === 1) {
+          } else if (room.field.declaredNumber === 0 && room.field.currentCards.length === 1) {
             const spade3 = player.hand.find(c => c.suit === 'spade' && c.number === 3);
             if (spade3) counterCards = [spade3];
+          }
         }
-      }
 
-      if (counterCards.length > 0) {
-        const result = GameEngine.declareCounter(room, actorId, counterCards.map(c => c.id));
-        if (result.success) {
-          onCounterDeclared(actorId);
+        if (counterCards.length > 0) {
+          const result = GameEngine.declareCounter(room, actorId, counterCards.map(c => c.id));
+          if (result.success) {
+            onCounterDeclared(actorId);
+          } else {
+            onSkipCounter();
+          }
         } else {
           onSkipCounter();
         }
-      } else {
+      } catch (err) {
+        console.error(`AI Logic [${player.name}]: Error in runCounterDecision timeout:`, err);
         onSkipCounter();
       }
     }, thinkingTime);
