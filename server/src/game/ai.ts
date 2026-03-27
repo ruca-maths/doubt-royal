@@ -6,9 +6,23 @@ import * as ort from 'onnxruntime-node';
 import path from 'path';
 
 export class AIEngine {
+  private static thinkingPlayers = new Set<string>();
   private static session: ort.InferenceSession | null = null;
   private static sessionPromise: Promise<ort.InferenceSession | null> | null = null;
-  private static modelPath = path.join(process.cwd(), 'doubt_royale_model_latest.onnx');
+
+  private static getModelPath(): string {
+    const cwd = process.cwd();
+    const pathsToTry = [
+      path.join(cwd, 'doubt_royale_model_latest.onnx'),
+      path.join(cwd, 'server', 'doubt_royale_model_latest.onnx'),
+      path.join(__dirname, '..', '..', 'doubt_royale_model_latest.onnx')
+    ];
+    
+    for (const p of pathsToTry) {
+      if (require('fs').existsSync(p)) return p;
+    }
+    return pathsToTry[0]; // fallback
+  }
 
   private static async getSession(): Promise<ort.InferenceSession | null> {
     if (this.session) return this.session;
@@ -16,8 +30,9 @@ export class AIEngine {
 
     this.sessionPromise = (async () => {
       try {
-        console.log(`AI Logic: Loading RL Model from ${this.modelPath}...`);
-        this.session = await ort.InferenceSession.create(this.modelPath);
+        const modelPath = this.getModelPath();
+        console.log(`AI Logic: Loading RL Model from ${modelPath}...`);
+        this.session = await ort.InferenceSession.create(modelPath);
         console.log('AI Logic: RL Model loaded successfully.');
         return this.session;
       } catch (e) {
@@ -36,6 +51,18 @@ export class AIEngine {
   ): Promise<void> {
     const player = room.players.find(p => p.id === playerId);
     if (!player || player.isOut) return;
+    
+    // Prevent redundant calls
+    if (this.thinkingPlayers.has(playerId)) {
+      console.log(`AI Logic [${player.name}]: Already thinking. Ignoring redundant call.`);
+      return;
+    }
+    this.thinkingPlayers.add(playerId);
+
+    const wrappedOnAction = (actionType: 'play' | 'pass', result?: { success: boolean; skipDoubt?: boolean; error?: string }) => {
+      this.thinkingPlayers.delete(playerId);
+      onAction(actionType, result);
+    };
 
     let session: ort.InferenceSession | null = null;
     try {
@@ -53,6 +80,7 @@ export class AIEngine {
         // Re-check game state after timeout
         if (room.phase !== 'playing' || room.turnOrder[room.currentPlayerIndex] !== playerId) {
           console.log(`AI Logic [${player.name}]: Phase changed or not my turn. Skipping.`);
+          this.thinkingPlayers.delete(playerId);
           return;
         }
         
@@ -64,6 +92,25 @@ export class AIEngine {
             const result = await this.predict(session, stateVector);
             console.log(`AI Logic [${player.name}]: Model predicted action index ${result}`);
             action = this.mapActionToGame(room, player, result);
+            
+            // Validate RL action
+            if (action.type === 'play') {
+              const validation = validatePlayCards(
+                action.cards!, 
+                action.declaredNumber!, 
+                { 
+                  currentCardCount: room.field.currentCards.length, 
+                  declaredNumber: room.field.declaredNumber,
+                  lastPlayerId: room.field.lastPlayerId
+                },
+                room.rules
+              );
+              
+              if (!validation.valid) {
+                console.warn(`AI Logic [${player.name}]: RL move invalid (${validation.reason}), falling back to heuristic.`);
+                action = this.decidePlayActionHeuristic(room, player);
+              }
+            }
           } catch (e) {
             console.error(`AI Logic [${player.name}]: Prediction failed, falling back to heuristic.`, e);
             action = this.decidePlayActionHeuristic(room, player);
@@ -77,24 +124,25 @@ export class AIEngine {
 
         if (action.type === 'pass') {
           const result = GameEngine.passTurn(room, playerId);
-          onAction('pass', result);
+          wrappedOnAction('pass', result);
         } else if (action.type === 'play' && action.cards) {
           const result = GameEngine.playCards(room, playerId, action.cards.map(c => c.id), action.declaredNumber!);
-          onAction('play', result);
+          wrappedOnAction('play', result);
         } else {
           // Fallback pass to prevent freeze
           console.warn(`AI Logic [${player.name}]: Invalid action state. Forcing pass.`);
           const result = GameEngine.passTurn(room, playerId);
-          onAction('pass', result);
+          wrappedOnAction('pass', result);
         }
       } catch (err) {
         console.error(`AI Logic [${player.name}]: CRITICAL ERROR in runPlayTurn:`, err);
         // Ensure the game doesn't freeze
         try {
           const result = GameEngine.passTurn(room, playerId);
-          onAction('pass', result);
+          wrappedOnAction('pass', result);
         } catch (innerErr) {
           console.error("Failed to even pass turn after AI error:", innerErr);
+          this.thinkingPlayers.delete(playerId);
         }
       }
     }, thinkingTime);
@@ -379,58 +427,75 @@ export class AIEngine {
     const effect = room.pendingEffect;
     const player = room.players.find(p => p.id === effect.playerId);
     if (!player || !player.isAI || player.isOut) return;
+
+    if (this.thinkingPlayers.has(player.id)) return;
+    this.thinkingPlayers.add(player.id);
+
     const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
     setTimeout(() => {
-      if (room.phase !== 'effectPhase' || room.pendingEffect !== effect) return;
-      const cardIds: string[] = [];
-      let targetData: { numbers?: number[] } | undefined;
+      try {
+        if (room.phase !== 'effectPhase' || room.pendingEffect !== effect) {
+          this.thinkingPlayers.delete(player.id);
+          return;
+        }
 
-      switch (effect.type) {
-        case 'sevenPass':
-        case 'doubtCardSelect':
-        case 'tenDiscard': {
-          const count = Math.min(effect.count, player.hand.length);
-          if (count > 0) {
-            const sortedHand = [...player.hand].sort((a, b) => {
-              let rankA = (a.number === 2) ? 15 : (a.number === 1 ? 14 : (a.isJoker ? 16 : a.number));
-              let rankB = (b.number === 2) ? 15 : (b.number === 1 ? 14 : (b.isJoker ? 16 : b.number));
-              if (room.rules.isRevolution) {
-                rankA = (a.number === 2) ? -15 : (a.number === 1 ? -14 : (a.isJoker ? 16 : -a.number));
-                rankB = (b.number === 2) ? -15 : (b.number === 1 ? -14 : (b.isJoker ? 16 : -b.number));
-              }
-              return rankA - rankB;
-            });
-            const excludedNumbers = (effect as any).excludedNumbers as number[] | undefined;
-            let availableCards = sortedHand;
-            if (excludedNumbers) availableCards = availableCards.filter(c => !excludedNumbers.includes(c.number) && !(excludedNumbers.includes(0) && c.isJoker));
-            for (let i = 0; i < Math.min(count, availableCards.length); i++) cardIds.push(availableCards[i].id);
+        const cardIds: string[] = [];
+        let targetData: { numbers?: number[] } | undefined;
+
+        switch (effect.type) {
+          case 'sevenPass':
+          case 'doubtCardSelect':
+          case 'tenDiscard': {
+            const count = Math.min(effect.count, player.hand.length);
+            if (count > 0) {
+              const sortedHand = [...player.hand].sort((a, b) => {
+                let rankA = (a.number === 2) ? 15 : (a.number === 1 ? 14 : (a.isJoker ? 16 : a.number));
+                let rankB = (b.number === 2) ? 15 : (b.number === 1 ? 14 : (b.isJoker ? 16 : b.number));
+                if (room.rules.isRevolution) {
+                  rankA = (a.number === 2) ? -15 : (a.number === 1 ? -14 : (a.isJoker ? 16 : -a.number));
+                  rankB = (b.number === 2) ? -15 : (b.number === 1 ? -14 : (b.isJoker ? 16 : -b.number));
+                }
+                return rankA - rankB;
+              });
+              const excludedNumbers = (effect as any).excludedNumbers as number[] | undefined;
+              let availableCards = sortedHand;
+              if (excludedNumbers) availableCards = availableCards.filter(c => !excludedNumbers.includes(c.number) && !(excludedNumbers.includes(0) && c.isJoker));
+              for (let i = 0; i < Math.min(count, availableCards.length); i++) cardIds.push(availableCards[i].id);
+            }
+            break;
           }
-          break;
-        }
-        case 'sixCollect': {
-          const count = Math.min(effect.count, room.field.faceUpPool.length);
-          if (count > 0) {
-            const sortedPool = [...room.field.faceUpPool].sort((a, b) => {
-              let rankA = (a.number === 2) ? 15 : (a.number === 1 ? 14 : (a.isJoker ? 16 : a.number));
-              let rankB = (b.number === 2) ? 15 : (b.number === 1 ? 14 : (b.isJoker ? 16 : b.number));
-              if (room.rules.isRevolution) {
-                rankA = (a.number === 2) ? -15 : (a.number === 1 ? -14 : (a.isJoker ? 16 : -a.number));
-                rankB = (b.number === 2) ? -15 : (b.number === 1 ? -14 : (b.isJoker ? 16 : -b.number));
-              }
-              return rankB - rankA;
-            });
-            for (let i = 0; i < count; i++) cardIds.push(sortedPool[i].id);
+          case 'sixCollect': {
+            const count = Math.min(effect.count, room.field.faceUpPool.length);
+            if (count > 0) {
+              const sortedPool = [...room.field.faceUpPool].sort((a, b) => {
+                let rankA = (a.number === 2) ? 15 : (a.number === 1 ? 14 : (a.isJoker ? 16 : a.number));
+                let rankB = (b.number === 2) ? 15 : (b.number === 1 ? 14 : (b.isJoker ? 16 : b.number));
+                if (room.rules.isRevolution) {
+                  rankA = (a.number === 2) ? -15 : (a.number === 1 ? -14 : (a.isJoker ? 16 : -a.number));
+                  rankB = (b.number === 2) ? -15 : (b.number === 1 ? -14 : (b.isJoker ? 16 : -b.number));
+                }
+                return rankB - rankA;
+              });
+              for (let i = 0; i < count; i++) cardIds.push(sortedPool[i].id);
+            }
+            break;
           }
-          break;
+          case 'queenBomber': {
+            const randomNum = Math.floor(Math.random() * 13) + 1;
+            targetData = { numbers: [randomNum] };
+            break;
+          }
         }
-        case 'queenBomber': {
-          const randomNum = Math.floor(Math.random() * 13) + 1;
-          targetData = { numbers: [randomNum] };
-          break;
-        }
+        
+        console.log(`AI Logic [${player.name}]: Performing effect action ${effect.type}.`);
+        GameEngine.handleEffectAction(room, effect.playerId, cardIds, targetData);
+        this.thinkingPlayers.delete(player.id);
+        onAction();
+      } catch (err) {
+        console.error(`AI Logic [${player.name}]: Error in runEffectDecision:`, err);
+        this.thinkingPlayers.delete(player.id);
+        onAction(); // Still call onAction to continue even if current action failed
       }
-      GameEngine.handleEffectAction(room, effect.playerId, cardIds, targetData);
-      onAction();
     }, thinkingTime);
   }
 }
