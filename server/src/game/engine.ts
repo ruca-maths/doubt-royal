@@ -318,10 +318,10 @@ export class GameEngine {
       }
       return;
     } else if (result.type === 'success') {
-      // Move the liar's revealed cards to cardHistory with face-up flag (Phase 14 fix)
-      // They will remain on the field until clearField moves them to faceUpPool
+      // Move the liar's revealed cards to the face-up pool immediately (Phase 14 fix)
+      // Since being revealed by doubt, they should be visible in the face-up graveyard.
       result.revealedCards.forEach(c => { c.isFaceUp = true; });
-      room.field.cardHistory.push(...result.revealedCards);
+      moveCardsToGrave(room, result.revealedCards);
 
       // Phase 14: Liar's cards NOT returned to hand (Requirement 5)
       // (The block that returned them to hand has been removed)
