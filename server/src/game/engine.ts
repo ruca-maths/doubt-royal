@@ -228,15 +228,21 @@ export class GameEngine {
 
     const activePlayers = room.players.filter(p => !p.isOut);
     const nextPlayerId = room.turnOrder[room.currentPlayerIndex];
+    
+    // Check if the last player who played cards is already out
+    const lastPlayer = room.players.find(p => p.id === room.field.lastPlayerId);
+    const isFieldOwnerOut = lastPlayer?.isOut && !!room.field.lastPlayerId;
+
     const isBackToLastPlayer = room.field.lastPlayerId && nextPlayerId === room.field.lastPlayerId;
     const isEveryonePassed = room.passCount >= activePlayers.length - 1 && room.field.lastPlayerId !== null;
 
-    if (isBackToLastPlayer || isEveryonePassed) {
-      console.log(`[Field Clear] Reason: ${isBackToLastPlayer ? 'BackToLead' : 'EveryonePassed'}`);
+    if (isBackToLastPlayer || isEveryonePassed || isFieldOwnerOut) {
+      console.log(`[Field Clear] Reason: ${isBackToLastPlayer ? 'BackToLead' : (isEveryonePassed ? 'EveryonePassed' : 'FieldOwnerOut')}`);
       clearField(room);
       room.passCount = 0;
     }
   }
+
 
   /**
    * Handle doubt resolution effects on game state.

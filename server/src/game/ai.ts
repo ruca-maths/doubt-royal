@@ -424,15 +424,19 @@ export class AIEngine {
       let availableNumbers = Array.from(handByNumber.keys()).filter(n => n !== 0);
       if (availableNumbers.length === 0) availableNumbers = [0];
 
+      const isReversed = room.rules.isRevolution !== room.rules.isElevenBack;
+
       availableNumbers.sort((a, b) => {
         let rankA = (a === 2) ? 15 : (a === 1 ? 14 : a);
         let rankB = (b === 2) ? 15 : (b === 1 ? 14 : b);
-        if (room.rules.isRevolution) {
+        
+        if (isReversed) {
           rankA = (a === 2) ? -15 : (a === 1 ? -14 : -a);
           rankB = (b === 2) ? -15 : (b === 1 ? -14 : -b);
         }
         return rankA - rankB;
       });
+
 
       const numToPlay = availableNumbers[0];
       const cards = handByNumber.get(numToPlay)!;
