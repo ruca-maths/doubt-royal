@@ -18,6 +18,7 @@ export class AIEngine {
   private static getModelPath(): string {
     const cwd = process.cwd();
     const modelNames = [
+      'doubt_royale_v8_latest.onnx',
       'doubt_royale_v5_latest.onnx',
       'doubt_royale_deepnash_latest.onnx',
       'doubt_royale_model_latest.onnx'
