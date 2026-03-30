@@ -1,0 +1,42 @@
+﻿--- Strength Test ---
+Strength of 10: 7
+Strength of 4: 1
+Strength of Ace(1): 11
+Strength of 2: 12
+
+--- Validation Test (Normal) ---
+[Validation] Play 4 (Str: 1) vs Field 10 (Str: 7). Rev: false, 11B: false
+node.exe : [Validation]
+ REJECTED: Strength 1 <
+= 7
+発生場所 行:1 文字:1
++ & "C:\Program Files\n
+odejs/node.exe" "C:\Pro
+gram Files\nodejs/node_
+mo ...
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~
+    + CategoryInfo     
+         : NotSpecified
+: ([    Validation] REJ
+ECTED:     Strength 1 <
+= 7:Stri    ng) [], Rem
+oteExcepti    on
+    + FullyQualifiedErr
+or    Id : NativeComman
+dErr    or
+ 
+Can play 4 on 10? false 蝣ｴ繧医ｊ蠑ｷ縺・き繝ｼ繝峨ｒ蜃ｺ縺励※縺上□縺輔＞
+[Validation] Play 1 (Str: 11) vs Field 10 (Str: 7). Rev: false, 11B: false
+Can play Ace on 10? true 
+
+--- Validation Test (Revolution) ---
+[Validation] Play 4 (Str: 11) vs Field 10 (Str: 5). Rev: true, 11B: false
+Can play 4 on 10 in Revolution? true 
+
+--- Validation Test (Eleven Back) ---
+[Validation] Play 4 (Str: 11) vs Field 10 (Str: 5). Rev: false, 11B: true
+Can play 4 on 10 in Eleven Back? true 
+

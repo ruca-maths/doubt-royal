@@ -17,14 +17,25 @@ export class AIEngine {
 
   private static getModelPath(): string {
     const cwd = process.cwd();
-    const pathsToTry = [
-      path.join(cwd, 'doubt_royale_model_latest.onnx'),
-      path.join(cwd, 'server', 'doubt_royale_model_latest.onnx'),
-      path.join(__dirname, '..', '..', 'doubt_royale_model_latest.onnx')
+    const modelNames = [
+      'doubt_royale_v5_latest.onnx',
+      'doubt_royale_deepnash_latest.onnx',
+      'doubt_royale_model_latest.onnx'
     ];
     
+    const pathsToTry: string[] = [];
+    for (const name of modelNames) {
+      pathsToTry.push(path.join(cwd, name));
+      pathsToTry.push(path.join(cwd, 'server', name));
+      pathsToTry.push(path.join(cwd, 'server', 'rl', name));
+      pathsToTry.push(path.join(__dirname, '..', '..', name));
+    }
+    
     for (const p of pathsToTry) {
-      if (require('fs').existsSync(p)) return p;
+      if (require('fs').existsSync(p)) {
+        console.log(`AI Engine: Found model at ${p}`);
+        return p;
+      }
     }
     return pathsToTry[0]; // fallback
   }
@@ -164,11 +175,23 @@ export class AIEngine {
     try {
       const input = new ort.Tensor('float32', new Float32Array(state), [1, 62]);
       const results = await session.run({ input });
-      const output = results.output.data as Float32Array;
+      
+      // Determine which output to use (action_probs for DeepNash, output for old DQN)
+      let outputData: Float32Array;
+      if (results.action_probs) {
+        outputData = results.action_probs.data as Float32Array;
+      } else if (results.output) {
+        outputData = results.output.data as Float32Array;
+      } else {
+        // Fallback: Use the first output available
+        const firstKey = Object.keys(results)[0];
+        outputData = results[firstKey].data as Float32Array;
+      }
+
       // Get index of max value
       let maxIdx = 0;
-      for (let i = 1; i < output.length; i++) {
-          if (output[i] > output[maxIdx]) maxIdx = i;
+      for (let i = 1; i < outputData.length; i++) {
+          if (outputData[i] > outputData[maxIdx]) maxIdx = i;
       }
       return maxIdx;
     } catch (e) {
