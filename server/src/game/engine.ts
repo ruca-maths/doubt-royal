@@ -54,6 +54,9 @@ export class GameEngine {
     room.pendingFinishPlayerId = null;
     room.passCount = 0;
     room.logs = []; // Initialize logs
+
+    // 手札配布後にAIの戦略を立案
+    AIEngine.initializeStrategy(room);
   }
 
   /**
@@ -1081,7 +1084,7 @@ export class GameEngine {
     if (room.rollbackState) {
       if (room.rollbackState.lastPlayerId === oldId) room.rollbackState.lastPlayerId = newId;
       if (room.rollbackState.skippedPlayerIds) {
-        room.rollbackState.skippedPlayerIds = room.rollbackState.skippedPlayerIds.map(id => id === oldId ? newId : id);
+        room.rollbackState.skippedPlayerIds = room.rollbackState.skippedPlayerIds.map((id: string) => id === oldId ? newId : id);
       }
     }
 

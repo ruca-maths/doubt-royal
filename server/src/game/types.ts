@@ -102,6 +102,14 @@ export interface Room {
   pendingEffect: PendingEffect | null;
   deferredEffect: PendingEffect | null;
   doubtTimerId: NodeJS.Timeout | null;
+  rollbackState?: {
+    currentCards: Card[];
+    declaredNumber: number;
+    lastPlayerId: string | null;
+    doubtType: 'play' | 'discard' | 'counter' | null;
+    rules: RulesState;
+    skippedPlayerIds: string[];
+  };
   pendingFinishPlayerId: string | null;
   counterActorIndex: number | null;
   passCount: number;
