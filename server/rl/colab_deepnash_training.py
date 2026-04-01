@@ -1,10 +1,9 @@
 """
 Google Colab で実行するための Doubt Royale 強化学習スクリプト
-【Phase 3: DeepNash (R-NaD) 応用版】
-Actor-Critic (PPOベース) アーキテクチャに KL ダイバージェンス正則化を組み合わせ、自己対戦でナッシュ均衡への収束を目指す手法。
-Colab にコピペして実行できます。
+【Phase 4: 全特殊効果(Q/7/10等) ＋ カウンター(4/スペ3) 実装版】
 """
 
+import os
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
@@ -17,464 +16,458 @@ from torch.distributions import Categorical
 import copy
 import time
 
-# ==========================================
-# 1. 環境の定義 (Doubt Royale)
-# ==========================================
-class DoubtRoyaleEnv(gym.Env):
-    def __init__(self, num_players=4):
-        super(DoubtRoyaleEnv, self).__init__()
-        self.num_players = num_players
-        # 自己対戦用
-        self.opponent_policies = None 
-        
-        # 状態空間: 62次元
-        # 手札(54) + フィールド(3) + 他人数(3) + ステータス(2)
-        self.observation_space = spaces.Dict({
-            "hand": spaces.Box(low=0, high=1, shape=(54,), dtype=np.int32),
-            "field": spaces.Box(low=0, high=13, shape=(3,), dtype=np.int32),
-            "others_count": spaces.Box(low=0, high=54, shape=(num_players - 1,), dtype=np.int32),
-            "status": spaces.MultiBinary(2)
-        })
-        # 0: Pass, 1-13: Honest Play, 14: Doubt, 15: Counter, 16-28: Lie Play
-        self.action_space = spaces.Discrete(29)
+try:
+    from google.colab import drive
+    drive.mount('/content/drive')
+    SAVE_DIR = '/content/drive/MyDrive/doubt_royale_ai_v14'
+    os.makedirs(SAVE_DIR, exist_ok=True)
+except Exception:
+    SAVE_DIR = '.'
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+class DynamicRewardSystem:
+    def __init__(self):
+        self.weights = {
+            'honest_play': 0.1,
+            'bluff_success': 0.2,
+            'bluff_caught': -0.3,
+            'doubt_success': 1.0,
+            'doubt_failure': -1.0,
+            'win': 100.0,
+            'lose': -30.0,
+            'pass': -0.02,
+            'invalid_action': -0.5,
+            'forbidden_finish': -50.0 # あがり禁止ペナルティ
+        }
+        self.recent_wins = []
+        self.last_adj_ep = 0
+
+    def get_reward(self, event): return self.weights.get(event, 0.0)
+    
+    def record_win(self, won):
+        self.recent_wins.append(1 if won else 0)
+        if len(self.recent_wins) > 100: self.recent_wins.pop(0)
+
+    def adjust(self, ep):
+        if ep - self.last_adj_ep < 500 or len(self.recent_wins) < 100: return
+        self.last_adj_ep = ep
+        win_rate = sum(self.recent_wins) / len(self.recent_wins)
+        diff = win_rate - 0.25
+        agg = max(0.8, min(1.2, 1.0 + diff * 0.5))
+        con = max(0.8, min(1.2, 1.0 - diff * 0.5))
+        
+        self.weights['bluff_success'] *= agg
+        self.weights['doubt_success'] *= agg
+        self.weights['doubt_failure'] *= con
+        self.weights['invalid_action'] *= con
+        self.weights['pass'] *= con
+        self.weights['bluff_caught'] *= con
+        self.weights['honest_play'] *= con
+
+        for k in ['honest_play', 'bluff_success', 'doubt_success']:
+            self.weights[k] = min(max(self.weights[k], 0.05), 10.0)
+        for k in ['doubt_failure', 'pass', 'invalid_action', 'bluff_caught']:
+            self.weights[k] = min(max(self.weights[k], -10.0), -0.01)
+
+class DoubtRoyaleEnv(gym.Env):
+    def __init__(self, reward_sys, num_players=4):
+        super().__init__()
+        self.num_players = num_players
+        self.reward_sys = reward_sys
+        self.opponent_policies = None
+        self.device = DEVICE
+        
+        # 0: Pass/Decline, 1-13: Honest, 14: Doubt, 15: -, 16-28: Bluff
+        # 29: Counter 4, 30: Counter Spade 3, 31-43: Q Bomb Num (1-13), 44: Q Bomb Joker
+        # 45-98: Select Card Index (0-53)
+        self.action_space = spaces.Discrete(100)
+        
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.deck = self._create_deck()
-        random.shuffle(self.deck)
+        deck = [{"suit": s, "number": n, "id": f"{s}-{n}", "is_joker": False} for s in range(4) for n in range(1, 14)]
+        deck += [{"suit": -1, "number": 0, "id": f"joker-{i}", "is_joker": True} for i in [1, 2]]
+        random.shuffle(deck)
+        
         self.hands = [[] for _ in range(self.num_players)]
-        for i in range(54):
-            self.hands[i % self.num_players].append(self.deck[i])
-        self.current_player = 0
+        for i in range(54): self.hands[i % self.num_players].append(deck[i])
+        
+        self.turn_player = random.randint(0, self.num_players - 1)
+        self.active_player = self.turn_player
+        self.phase = 'playing'
+        self.ask_idx = 0
+        self.pending_effect = None
+        
         self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
+        self.face_up_pool = []
         self.is_revolution = False
         self.is_eleven_back = False
         self.player_lives = [3] * self.num_players
         self.player_out = [False] * self.num_players
-        self.pass_count = 0
-        return self._get_obs(0), {}
+        return self._get_flat_obs(0), {}
 
-    def _create_deck(self):
-        deck = []
-        for suit in range(4):
-            for num in range(1, 14):
-                deck.append({"suit": suit, "number": num, "id": f"card-{len(deck)}", "is_joker": False})
-        # Jokers
-        deck.append({"suit": -1, "number": 0, "id": "card-52", "is_joker": True})
-        deck.append({"suit": -1, "number": 0, "id": "card-53", "is_joker": True})
-        return deck
-
-    def _get_obs(self, player_idx):
+    def _get_flat_obs(self, player_idx):
         hand_vec = np.zeros(54, dtype=np.float32)
         for card in self.hands[player_idx]:
-            idx = int(card["id"].split("-")[1])
-            if 0 <= idx < 54: hand_vec[idx] = 1.0
-        
-        others_count = []
-        for i in range(self.num_players):
-            if i != player_idx:
-                others_count.append(len(self.hands[i]))
-        others_count = np.array(others_count, dtype=np.float32)
-        
-        last_player_rel = (self.field["last_player"] - player_idx + self.num_players) % self.num_players if self.field["last_player"] != -1 else -1
-        
-        field_vec = np.array([self.field["number"], self.field["count"], last_player_rel], dtype=np.float32)
-        status_vec = np.array([int(self.is_revolution), int(self.is_eleven_back)], dtype=np.float32)
-        if len(self.hands[player_idx]) == 0:
-            hand_vec = np.zeros(54, dtype=np.float32) # Already out
+            if card["is_joker"]: idx = 52 if "1" in card["id"] else 53
+            else: idx = card["suit"] * 13 + (card["number"] - 1)
+            hand_vec[idx] = 1.0
             
-        return {
-            "hand": hand_vec,
-            "field": field_vec,
-            "others_count": others_count,
-            "status": status_vec
-        }
+        others = np.array([len(self.hands[i]) for i in range(self.num_players) if i != player_idx], dtype=np.float32)
+        field_vec = np.array([self.field["number"], self.field["count"], self.field["last_player"]], dtype=np.float32)
         
-    def _get_flat_obs(self, player_idx):
-        obs = self._get_obs(player_idx)
-        return np.concatenate([obs["hand"], obs["field"], obs["others_count"], obs["status"]]).astype(np.float32)
+        phase_map = {'playing':0, 'doubting':1, 'countering':2, 'q_bomb':3, 'card_sel':4}
+        status_vec = np.array([self.is_revolution, self.is_eleven_back, phase_map[self.phase]], dtype=np.float32)
+        
+        obs = np.concatenate([hand_vec, field_vec, others, status_vec])
+        return np.pad(obs, (0, 100 - len(obs)))
+
+    def _add_reward(self, event):
+        self.reward_buffer += self.reward_sys.get_reward(event)
 
     def step(self, action):
-        terminated = False
-        reward = 0.0
-        
-        if self.player_out[0]:
-            return self._get_obs(0), 0.0, True, False, {}
+        self.reward_buffer = 0.0
+        if self.player_out[0]: return self._get_flat_obs(0), 0.0, True, False, {}
 
-        # 0: Pass, 1-13: Honest Play, 14: Doubt, 15: Counter, 16-28: Lie
-        if action == 0:
-            self._handle_pass(0)
-        elif 1 <= action <= 13:
-            played = self._handle_play(0, action, lie=False)
-            if played: reward += 0.1 # 有効なプレイのステップ報酬
-            else: reward -= 0.1      # 無効なアクション（出せないカードなど）
-        elif action == 14:
-            success = self._handle_doubt(0)
-            if success: reward += 1.0
-            else: reward -= 1.0
-        elif 16 <= action <= 28:
-            played = self._handle_play(0, action - 15, lie=True)
-            if played: reward += 0.2 # ブラフ成立
+        # プレイヤー0のターンでない場合
+        if self.active_player != 0:
+            self._simulate_others()
+            done, is_win = self._check_done()
+            if done: self._add_reward('win' if is_win else 'lose')
+            return self._get_flat_obs(0), self.reward_buffer, done, False, {}
 
-        # 他プレイヤーの思考シミュレーション (自己対戦)
+        # プレイヤー0のターン
+        valid = False
+        if self.phase == 'playing':
+            if action == 0: valid = self._handle_pass(0); self._add_reward('pass')
+            elif 1 <= action <= 13: 
+                valid = self._handle_play(0, action, False)
+                if valid: self._add_reward('honest_play')
+            elif 16 <= action <= 28: 
+                valid = self._handle_play(0, action - 15, True) # 成功報酬は他人のダウトフェーズ終了時に入る
+        elif self.phase == 'doubting':
+            if action == 0: self._resolve_doubt(0, False); valid = True
+            elif action == 14: 
+                suc = self._resolve_doubt(0, True); valid = True
+                self._add_reward('doubt_success' if suc else 'doubt_failure')
+        elif self.phase == 'countering':
+            if action == 0: self._resolve_counter(0, 0); valid = True
+            elif action == 29: valid = self._resolve_counter(0, 4)
+            elif action == 30: valid = self._resolve_counter(0, 3)
+        elif self.phase == 'q_bomb':
+            if 31 <= action <= 44: self._apply_q_bomb(action - 30 if action <= 43 else 0); valid = True
+        elif self.phase == 'card_sel':
+            if 45 <= action <= 98: valid = self._apply_card_select(0, action - 45)
+            
+        if not valid:
+            self._add_reward('invalid_action')
+            if self.phase == 'q_bomb': self._apply_q_bomb(1)
+            elif self.phase == 'card_sel': self._apply_card_select(0, -1)
+            elif self.phase == 'playing': self._handle_pass(0)
+            else: self.active_player = self._next_player(self.active_player)
+            
         self._simulate_others()
-
-        # 勝敗・終了判定
-        if len(self.hands[0]) == 0 and not self.player_out[0]:
-            reward += 10.0 # 勝利報酬
-            self.player_out[0] = True
-            terminated = True
-        elif sum(self.player_out) >= self.num_players - 1:
-            if not self.player_out[0]:
-                reward -= 5.0 # 敗北報酬（最後まで残った）
-                self.player_out[0] = True
-            terminated = True
-        elif self.player_out[0]:
-            terminated = True
-            
-        return self._get_obs(0), reward, terminated, False, {}
-
-    def _handle_play(self, player_idx, declared_num, lie=False):
-        hand = self.hands[player_idx]
-        if not hand: return False
+        done, is_win = self._check_done()
+        if done: self._add_reward('win' if is_win else 'lose')
         
-        cards_to_play = []
+        return self._get_flat_obs(0), self.reward_buffer, done, False, {}
+
+    def _check_done(self):
+        ai_won = len(self.hands[0]) == 0 and self.player_lives[0] > 0
+        ai_dead = self.player_out[0]
+        any_opp_won = any(len(self.hands[i]) == 0 and self.player_lives[i] > 0 for i in range(1, self.num_players))
+        if ai_won: return True, True
+        if ai_dead or any_opp_won or sum(self.player_out) >= self.num_players - 1: return True, False
+        return False, False
+
+    def _next_player(self, p):
+        for _ in range(self.num_players):
+            p = (p + 1) % self.num_players
+            if not self.player_out[p]: return p
+        return p
+
+    def _handle_pass(self, p_idx):
+        if self.field["last_player"] in [-1, p_idx]: self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
+        self.turn_player = self._next_player(p_idx)
+        self.active_player = self.turn_player
+        return True
+
+    def _handle_play(self, p_idx, num, lie):
+        if not self.hands[p_idx]: return False
         if not lie:
-            cards_to_play = [c for c in hand if (0 if c["is_joker"] else c["number"]) == declared_num]
-            if not cards_to_play: cards_to_play = [hand[0]] # 持ってないのに正直に出そうとしたら強制先頭1枚
+            cards = [c for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) == num]
+            if not cards: cards = [self.hands[p_idx][0]]
         else:
-            others = [c for c in hand if (0 if c["is_joker"] else c["number"]) != declared_num]
-            cards_to_play = [others[0]] if others else [hand[0]]
+            cards = [self.hands[p_idx][0]]
             
-        if len(cards_to_play) > 0:
-            # フィールドに出す
-            self.hands[player_idx] = [c for c in hand if c["id"] not in [cp["id"] for cp in cards_to_play]]
-            self.field.update({"number": declared_num, "count": len(cards_to_play), "last_player": player_idx, "cards": cards_to_play})
-            
-            if len(self.hands[player_idx]) == 0:
-                self.player_out[player_idx] = True
-                
-            self.current_player = (self.current_player + 1) % self.num_players
-            return True
-        return False
+        cnt = max(1, self.field["count"]); cards = cards[:cnt]
+        self.hands[p_idx] = [c for c in self.hands[p_idx] if c["id"] not in [cp["id"] for cp in cards]]
+        self.field.update({"number": num, "count": len(cards), "last_player": p_idx, "cards": cards})
+        if len(cards) >= 4: self.is_revolution = not self.is_revolution
+        self.phase = 'doubting'; self.ask_idx = 1; self._set_ask_player()
+        return True
 
-    def _handle_pass(self, player_idx):
-        self.current_player = (self.current_player + 1) % self.num_players
-        # 一周回ったか
-        if self.field["last_player"] == self.current_player:
+    def _set_ask_player(self):
+        while self.ask_idx < self.num_players:
+            p = (self.turn_player + self.ask_idx) % self.num_players
+            if not self.player_out[p]: self.active_player = p; return
+            self.ask_idx += 1
+            
+        if self.phase == 'doubting':
+            # 全員スルー（嘘が通った場合）
+            if self.field["last_player"] == 0: self._add_reward('bluff_success') # Player 0の嘘成功
+            
+            if self.field["number"] == 8 or (self.field["number"] == 0 and self.field["count"] == 1):
+                self.phase = 'countering'; self.ask_idx = 1; self._set_ask_player()
+            else: self._apply_effects()
+        elif self.phase == 'countering': self._apply_effects()
+
+    def _resolve_doubt(self, p_idx, is_doubt):
+        if not is_doubt:
+            self.ask_idx += 1; self._set_ask_player(); return False
+            
+        liar = self.field["last_player"]
+        is_lie = any((0 if c["is_joker"] else c["number"]) != self.field["number"] for c in self.field["cards"])
+        if is_lie:
+            self.hands[liar].extend(self.field["cards"])
+            if liar == 0: self._add_reward('bluff_caught') # Player 0がバレた
+            elif p_idx == 0: pass # 自分がダウトに成功した報酬はstep側で処理済み
             self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
-
-    def _handle_doubt(self, player_idx):
-        if self.field["last_player"] in [-1, player_idx]: 
-            self.current_player = (self.current_player + 1) % self.num_players
+            self.turn_player = self._next_player(self.turn_player); self.active_player = self.turn_player; self.phase = 'playing'
+            return True
+        else:
+            self.hands[p_idx].extend(self.field["cards"])
+            if p_idx == 0: self.player_lives[0] -= 1; # ダウト失敗ペナルティはstep側
+            elif liar == 0: self._add_reward('bluff_success') # 自分のブラフに相手が勝手にダウト自爆した
+            self.player_lives[p_idx] -= 1
+            if self.player_lives[p_idx] <= 0: self.player_out[p_idx] = True
+            self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
+            self.turn_player = self._next_player(self.turn_player); self.active_player = self.turn_player; self.phase = 'playing'
             return False
 
-        liar_idx = self.field["last_player"]
-        is_lie = any((0 if c["is_joker"] else c["number"]) != self.field["number"] for c in self.field["cards"])
-        
-        if is_lie:
-            self.hands[liar_idx].extend(self.field["cards"])
-            self.player_lives[liar_idx] -= 1
-            res = (player_idx == 0) # エージェントがダウト成功
-        else:
-            self.hands[player_idx].extend(self.field["cards"])
-            self.player_lives[player_idx] -= 1
-            res = (player_idx != 0) # エージェントがダウト失敗
+    def _resolve_counter(self, p_idx, counter_num):
+        if counter_num == 0:
+            self.ask_idx += 1; self._set_ask_player()
+            return True
             
-        self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
-        return res
+        has_card = any(c["number"] == counter_num for c in self.hands[p_idx])
+        if not has_card: return False
+        
+        c_card = next(c for c in self.hands[p_idx] if c["number"] == counter_num)
+        self.hands[p_idx] = [c for c in self.hands[p_idx] if c["id"] != c_card["id"]]
+        self.field["cards"].append(c_card)
+        self.field["last_player"] = p_idx
+        
+        self.turn_player = p_idx
+        self._apply_effects() # Counter resolves doubt phase directly
+        return True
+
+    def _apply_effects(self):
+        # 手札が0枚になった場合の勝利判定とあがり禁止チェック
+        num = self.field["number"]
+        if len(self.hands[self.turn_player]) == 0:
+            # あがり禁止カード判定
+            forbidden = [8, 0, 2, 3 if self.is_revolution else -1]
+            if num in forbidden:
+                # あがり禁止により強制敗北
+                self.player_out[self.turn_player] = True
+                if self.turn_player == 0:
+                    # 自身のペナルティ
+                    pass 
+            else:
+                # 合法的な勝利
+                self.player_out[self.turn_player] = True
+
+        # 特殊効果の適用
+        if num == 12 and not self.player_out[self.turn_player]:
+            self.phase = 'q_bomb'; self.active_player = self.turn_player; return
+        if num in [7, 10] and not self.player_out[self.turn_player]:
+            self.phase = 'card_sel'; self.pending_effect = num; self.active_player = self.turn_player; return
+        if num == 11:
+            self.is_eleven_back = not self.is_eleven_back
+        
+        # 8切りまたはカウンター成功時は場を流す
+        if num == 8 or getattr(self, "countered", False):
+            self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
+            # 8切りの場合はターン交代なし
+        elif num == 5:
+            self.turn_player = self._next_player(self._next_player(self.turn_player))
+        else:
+            self.turn_player = self._next_player(self.turn_player)
+            
+        self.active_player = self.turn_player
+        self.phase = 'playing'
+
+    def _apply_q_bomb(self, num):
+        for i in range(self.num_players):
+            if i == self.turn_player or self.player_out[i]: continue
+            drops = [c for c in self.hands[i] if (c["number"] == num or (num==0 and c["is_joker"]))]
+            self.hands[i] = [c for c in self.hands[i] if c not in drops]
+            self.face_up_pool.extend(drops)
+        self.turn_player = self._next_player(self.turn_player)
+        self.active_player = self.turn_player; self.phase = 'playing'
+
+    def _apply_card_select(self, p_idx, c_idx):
+        if c_idx < 0 or len(self.hands[p_idx]) == 0: c_idx = 0
+        if c_idx >= len(self.hands[p_idx]): return False
+        c = self.hands[p_idx].pop(c_idx)
+        if self.pending_effect == 7:
+            next_p = self._next_player(p_idx)
+            self.hands[next_p].append(c)
+        else:
+            self.face_up_pool.append(c)
+        self.turn_player = self._next_player(self.turn_player)
+        self.active_player = self.turn_player; self.phase = 'playing'
+        return True
 
     def _simulate_others(self):
         steps = 0
-        while self.current_player != 0 and sum(self.player_out) < self.num_players - 1 and steps < 100:
-            p_idx = self.current_player
-            if self.player_out[p_idx] or not self.hands[p_idx]:
-                self.player_out[p_idx] = True
-                self.current_player = (self.current_player + 1) % self.num_players
-                continue
-
-            # 自己対戦モデルが設定されていれば
-            if self.opponent_policies and len(self.opponent_policies) > p_idx:
-                policy_net = self.opponent_policies[p_idx]
+        while self.active_player != 0 and sum(self.player_out) < self.num_players - 1 and steps < 200:
+            p = self.active_player
+            if self.opponent_policies and len(self.opponent_policies) > p and self.opponent_policies[p] is not None:
                 with torch.no_grad():
-                    obs = self._get_flat_obs(p_idx)
-                    obs_t = torch.FloatTensor(obs).unsqueeze(0)
-                    action_probs, _ = policy_net(obs_t)
-                    dist = Categorical(action_probs)
-                    action = dist.sample().item()
+                    obs_t = torch.FloatTensor(self._get_flat_obs(p)).unsqueeze(0).to(self.device)
+                    probs, _ = self.opponent_policies[p](obs_t)
+                    a = Categorical(probs).sample().item()
             else:
-                # デフォルトのランダムヒューリスティック(初期学習用)
-                action = random.choice([0, 14, random.randint(1, 13)])
-
-            # Do action
-            if action == 0: self._handle_pass(p_idx)
-            elif 1 <= action <= 13: self._handle_play(p_idx, action, lie=False)
-            elif action == 14: self._handle_doubt(p_idx)
-            elif 16 <= action <= 28: self._handle_play(p_idx, action-15, lie=True)
-            else: self._handle_pass(p_idx) # safely fallback
+                if self.phase == 'playing': a = random.choice([0, 1])
+                elif self.phase == 'doubting': a = random.choice([0, 0, 0, 14])
+                elif self.phase == 'countering': a = 0
+                elif self.phase == 'q_bomb': a = 31
+                else: a = 45
+                
+            old_phase = self.phase
             
+            if self.phase == 'playing':
+                if a == 0: self._handle_pass(p)
+                elif 1 <= a <= 13: 
+                    if not self._handle_play(p, a, False): self._handle_pass(p)
+                elif 16 <= a <= 28: 
+                    if not self._handle_play(p, a - 15, True): self._handle_pass(p)
+                else: self._handle_pass(p)
+            elif self.phase == 'doubting':
+                if a == 14: self._resolve_doubt(p, True)
+                else: self._resolve_doubt(p, False)
+            elif self.phase == 'countering':
+                if a == 29: self._resolve_counter(p, 4)
+                elif a == 30: self._resolve_counter(p, 3)
+                else: self._resolve_counter(p, 0)
+            elif self.phase == 'q_bomb':
+                self._apply_q_bomb(a - 30 if 31 <= a <= 44 else 1)
+            elif self.phase == 'card_sel':
+                self._apply_card_select(p, a - 45 if 45 <= a <= 98 else -1)
+                
             steps += 1
 
-
-# ==========================================
-# 2. モデルの定義 (Actor-Critic)
-# ==========================================
 class ActorCriticNet(nn.Module):
-    def __init__(self, obs_dim=62, action_dim=29):
-        super(ActorCriticNet, self).__init__()
-        # 共有のバックボーン
+    def __init__(self, obs_dim=100, action_dim=100):
+        super().__init__()
         self.fc1 = nn.Linear(obs_dim, 256)
         self.fc2 = nn.Linear(256, 256)
-        
-        # Actor: 方策・確率 (Policy)
-        self.actor_head = nn.Linear(256, action_dim)
-        # Critic: 状態価値 (Value)
-        self.critic_head = nn.Linear(256, 1)
+        self.actor = nn.Linear(256, action_dim)
+        self.critic = nn.Linear(256, 1)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        
-        # アクション確率
-        logits = self.actor_head(x)
-        action_probs = F.softmax(logits, dim=-1)
-        
-        # 状態価値
-        state_value = self.critic_head(x)
-        
-        return action_probs, state_value
+        x = F.relu(self.fc1(x)); x = F.relu(self.fc2(x))
+        return F.softmax(self.actor(x), dim=-1), self.critic(x)
 
-# ==========================================
-# 3. Rollout Buffer (データ収集用)
-# ==========================================
-class RolloutBuffer:
-    def __init__(self):
-        self.states = []
-        self.actions = []
-        self.logprobs = []
-        self.rewards = []
-        self.is_terminals = []
-        self.values = []
-        
-    def clear(self):
-        del self.states[:]
-        del self.actions[:]
-        del self.logprobs[:]
-        del self.rewards[:]
-        del self.is_terminals[:]
-        del self.values[:]
-
-# ==========================================
-# 4. R-NaD / PPO ハイブリッド学習ループ
-# ==========================================
 class DeepNashAgent:
-    def __init__(self, obs_dim, action_dim, lr=3e-4, gamma=0.99, K_epochs=4, eps_clip=0.2, kl_coeff=0.01):
-        self.gamma = gamma
-        self.eps_clip = eps_clip
-        self.K_epochs = K_epochs
-        self.kl_coeff = kl_coeff # KL正則化の強さ (R-NaDの肝)
-        
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Device: {self.device}")
-        
-        # 現在の学習対象
+    def __init__(self, obs_dim, action_dim, lr=3e-4):
+        self.device = DEVICE
         self.policy = ActorCriticNet(obs_dim, action_dim).to(self.device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
-        
-        # 過去の方策（参照方策）
         self.ref_policy = ActorCriticNet(obs_dim, action_dim).to(self.device)
         self.ref_policy.load_state_dict(self.policy.state_dict())
-        
-        # 古い方策（PPO用）
-        self.policy_old = ActorCriticNet(obs_dim, action_dim).to(self.device)
-        self.policy_old.load_state_dict(self.policy.state_dict())
-        
-        self.buffer = RolloutBuffer()
-        # ロス記録用
-        self.loss_history = []
+        self.kl_coeff = 0.01
+        self.states, self.actions, self.logprobs, self.rewards, self.dones = [], [], [], [], []
 
     def select_action(self, state):
-        with torch.no_grad():
-            state = torch.FloatTensor(state).to(self.device)
-            action_probs, state_value = self.policy_old(state)
-            
-            dist = Categorical(action_probs)
-            action = dist.sample()
-            logprob = dist.log_prob(action)
-            
-        self.buffer.states.append(state)
-        self.buffer.actions.append(action)
-        self.buffer.logprobs.append(logprob)
-        self.buffer.values.append(state_value)
-        
+        state_t = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        with torch.no_grad(): probs, val = self.policy(state_t)
+        dist = Categorical(probs); action = dist.sample()
+        self.states.append(state_t); self.actions.append(action); self.logprobs.append(dist.log_prob(action))
         return action.item()
 
     def update(self):
-        if len(self.buffer.states) == 0:
-            return
-
-        # 報酬の割引計算 (GAEの代わりの単純なリターン計算)
-        rewards = []
-        discounted_reward = 0
-        for reward, is_terminal in zip(reversed(self.buffer.rewards), reversed(self.buffer.is_terminals)):
-            if is_terminal:
-                discounted_reward = 0
-            discounted_reward = reward + (self.gamma * discounted_reward)
-            rewards.insert(0, discounted_reward)
-            
-        # テンソル化
+        if not self.states: return
+        rewards, R = [], 0
+        for r, d in zip(reversed(self.rewards), reversed(self.dones)):
+            R = r + 0.99 * R * (1 - d); rewards.insert(0, R)
         rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
-        # 報酬の正規化
-        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
+        if len(rewards) > 1: rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
         
-        old_states = torch.stack(self.buffer.states).to(self.device).detach()
-        old_actions = torch.stack(self.buffer.actions).to(self.device).detach()
-        old_logprobs = torch.stack(self.buffer.logprobs).to(self.device).detach()
-
-        # K回エポック最適化 (PPO + R-NaD KL Constraint)
-        epoch_loss = 0
-        for _ in range(self.K_epochs):
-            action_probs, state_values = self.policy(old_states)
-            dist = Categorical(action_probs)
-            logprobs = dist.log_prob(old_actions)
-            dist_entropy = dist.entropy()
-            
-            # アドバンテージ
-            advantages = rewards - state_values.detach().squeeze()
-
-            # PPO 比率
-            ratios = torch.exp(logprobs - old_logprobs.detach())
-
-            # ---------------------------------------------
-            # R-NaD / DeepNash: KL正則化 (参照方策との距離)
-            # ---------------------------------------------
-            with torch.no_grad():
-                ref_action_probs, _ = self.ref_policy(old_states)
-            
-            # KL(pi || pi_ref) の計算
-            # pi * log(pi / pi_ref)
-            kl_div = F.kl_div(ref_action_probs.log(), action_probs, reduction='none').sum(dim=-1)
-            
-            # 損失計算
-            surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
-            
-            # Actor loss は Advantage を最大化し、KLを最小化する
-            # (kl_coeffが大きいほど過去の戦略から離れないように制約が働く)
-            actor_loss = -torch.min(surr1, surr2).mean() + self.kl_coeff * kl_div.mean()
-            # Critic loss は MSE
-            critic_loss = F.mse_loss(state_values.squeeze(), rewards)
-            
-            loss = actor_loss + 0.5 * critic_loss - 0.01 * dist_entropy.mean()
-            epoch_loss += loss.item()
-
-            self.optimizer.zero_grad()
-            loss.backward()
+        states, actions = torch.cat(self.states), torch.cat(self.actions)
+        for _ in range(4):
+            probs, values = self.policy(states); dist = Categorical(probs); logprobs = dist.log_prob(actions)
+            with torch.no_grad(): ref_probs, _ = self.ref_policy(states)
+            kl = (probs * (torch.log(probs + 1e-10) - torch.log(ref_probs + 1e-10))).sum(-1)
+            adv = rewards - values.detach().squeeze()
+            loss = -(logprobs * adv).mean() + 0.5 * F.mse_loss(values.squeeze(), rewards) + self.kl_coeff * kl.mean()
+            self.optimizer.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
             self.optimizer.step()
+        self.states, self.actions, self.logprobs, self.rewards, self.dones = [], [], [], [], []
+
+def train():
+    reward_sys = DynamicRewardSystem()
+    env = DoubtRoyaleEnv(reward_sys)
+    agent = DeepNashAgent(100, 100)
+    
+    start_ep = 1
+    ckpt = os.path.join(SAVE_DIR, "deepnash_policy_latest.pth")
+    if os.path.exists(ckpt):
+        try:
+            checkpoint = torch.load(ckpt, map_location=DEVICE)
+            if 'model_state_dict' in checkpoint:
+                agent.policy.load_state_dict(checkpoint['model_state_dict'])
+                agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                start_ep = checkpoint['episode'] + 1
+            else:
+                # 過去バージョン互換
+                agent.policy.load_state_dict(checkpoint)
             
-        self.loss_history.append(epoch_loss / self.K_epochs)
+            agent.ref_policy.load_state_dict(agent.policy.state_dict())
+            print(f"✅ チェックポイント復元: {ckpt} (エピソード {start_ep} から再開)")
+        except:
+            print(f"⚠️ ネットワーク構成変更またはファイル破損のため、新規学習からスタートします。")
 
-        # ネットワークの同期 (`policy_old`に反映)
-        self.policy_old.load_state_dict(self.policy.state_dict())
-        self.buffer.clear()
-
-    def update_reference_policy(self):
-        """ R-NaD 用の定期的な参照方策 (Target) の更新 """
-        self.ref_policy.load_state_dict(self.policy.state_dict())
-        print("--- Updated Reference Policy (KL Target) ---")
-
-def train_self_play_deepnash():
-    max_episodes = 20000 
-    max_timesteps = 300   # 1手ごとの最大長
-    update_timestep = 1000 # Bufferがこれだけ溜まったら更新
-    ref_policy_update_eps = 500 # 参照方策の更新頻度
-    
-    env = DoubtRoyaleEnv(num_players=4)
-    obs_dim = 62
-    action_dim = env.action_space.n
-    
-    agent = DeepNashAgent(obs_dim, action_dim)
-    
-    # 対戦相手のプール (自己対戦)
     opponent_pool = []
     
-    time_step = 0
-    t_start = time.time()
-    
-    for ep in range(1, max_episodes + 1):
-        # 相手をプールから選ぶ（いなければ初期方策）
-        current_opponents = []
-        for _ in range(env.num_players): # 自分含め4プレイスロット（0番はagentが入る）
-            if len(opponent_pool) > 0:
-                opp_policy = random.choice(opponent_pool)
-                current_opponents.append(opp_policy)
-            else:
-                current_opponents.append(agent.policy_old) 
-        
-        env.opponent_policies = current_opponents
-        
-        obs, _ = env.reset()
-        flat_obs = np.concatenate([obs["hand"], obs["field"], obs["others_count"], obs["status"]]).astype(np.float32)
-        
-        ep_reward = 0
-        for t in range(1, max_timesteps + 1):
-            time_step += 1
-            
-            # Action selection (Actor)
-            action = agent.select_action(flat_obs)
-            
-            # Step env
-            next_obs, reward, done, _, _ = env.step(action)
-            agent.buffer.rewards.append(reward)
-            agent.buffer.is_terminals.append(done)
-            
-            flat_obs = np.concatenate([next_obs["hand"], next_obs["field"], next_obs["others_count"], next_obs["status"]]).astype(np.float32)
+    start_time = time.time()
+    for ep in range(start_ep, 50001):
+        if opponent_pool: env.opponent_policies = [None] + [random.choice(opponent_pool) for _ in range(3)]
+        else: env.opponent_policies = [None] + [agent.policy] * 3
+
+        obs, _ = env.reset(); done = False; ep_reward = 0
+        while not done:
+            action = agent.select_action(obs)
+            obs, reward, done, _, _ = env.step(action)
+            agent.rewards.append(reward); agent.dones.append(done)
             ep_reward += reward
-            
-            if time_step % update_timestep == 0:
-                agent.update()
-                
-            if done:
-                break
-                
-        # 定期的な画面出力
+
+        agent.update()
+        
+        # 勝率には「1位になり生存しているか」のみを記録
+        is_first = len(env.hands[0]) == 0 and env.player_lives[0] > 0
+        reward_sys.record_win(is_first)
+        reward_sys.adjust(ep)
+
         if ep % 100 == 0:
-            avg_loss = agent.loss_history[-1] if len(agent.loss_history) > 0 else 0
-            print(f"Episode {ep} \t Avg Reward: {ep_reward:.2f} \t Loss: {avg_loss:.4f} \t Pool: {len(opponent_pool)}")
-            
-        # 参照方策の更新 (KLペナルティのゼロ設定)
-        if ep % ref_policy_update_eps == 0:
-            agent.update_reference_policy()
-            
-        # 定期的に相手プールに記録（多様な自己対戦相手の構築）
+            wr = sum(reward_sys.recent_wins) / len(reward_sys.recent_wins) if reward_sys.recent_wins else 0
+            print(f"EP {ep} | WinRate: {wr:.2%} | LastR: {ep_reward:.2f} | Time: {int(time.time()-start_time)}s")
+
         if ep % 1000 == 0:
-            new_opp = ActorCriticNet(obs_dim, action_dim).to(agent.device)
-            new_opp.load_state_dict(agent.policy.state_dict())
-            new_opp.eval()
+            torch.save({
+                'episode': ep,
+                'model_state_dict': agent.policy.state_dict(),
+                'optimizer_state_dict': agent.optimizer.state_dict()
+            }, ckpt)
+            torch.onnx.export(agent.policy, torch.randn(1, 100).to(DEVICE), os.path.join(SAVE_DIR, f"doubt_royale_v14_ep{ep}.onnx"))
+            agent.ref_policy.load_state_dict(agent.policy.state_dict())
+            new_opp = ActorCriticNet(100, 100).to(DEVICE)
+            new_opp.load_state_dict(agent.policy.state_dict()); new_opp.eval()
             opponent_pool.append(new_opp)
-            # プールが大きくなりすぎないように維持
-            if len(opponent_pool) > 10:
-                opponent_pool.pop(0)
+            if len(opponent_pool) > 10: opponent_pool.pop(0)
 
-    # ==========================
-    # 5. モデル出力 (ONNX変換)
-    # ==========================
-    print("Exporting trained model to ONNX...")
-    agent.policy.eval()
-    dummy_input = torch.randn(1, obs_dim).to(agent.device)
-    torch.onnx.export(
-        agent.policy, 
-        dummy_input, 
-        "doubt_royale_deepnash_latest.onnx", 
-        input_names=['input'], 
-        output_names=['action_probs', 'state_value'],
-        opset_version=11
-    )
-    
-    # サーバー用には Actor 部のみ（確率）が必要かも、現状は両方出力される
-    torch.save(agent.policy.state_dict(), "deepnash_policy.pth")
-    print(f"Training finished in {(time.time() - t_start)/60:.2f} minutes.")
-    print("Files 'deepnash_policy.pth' and 'doubt_royale_deepnash_latest.onnx' are generated.")
-
-if __name__ == '__main__':
-    train_self_play_deepnash()
+if __name__ == "__main__":
+    train()
