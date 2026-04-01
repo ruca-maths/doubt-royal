@@ -102,18 +102,10 @@ export interface Room {
   pendingEffect: PendingEffect | null;
   deferredEffect: PendingEffect | null;
   doubtTimerId: NodeJS.Timeout | null;
-  rollbackState?: {
-    currentCards: Card[];
-    declaredNumber: number;
-    lastPlayerId: string | null;
-    doubtType: 'play' | 'discard' | 'counter' | null;
-    rules: RulesState;
-    skippedPlayerIds: string[];
-  };
-  logs: LogEntry[];
   pendingFinishPlayerId: string | null;
   counterActorIndex: number | null;
   passCount: number;
+  logs: LogEntry[];
 }
 
 // ===== Client-visible state (sanitized) =====
@@ -146,15 +138,15 @@ export interface ClientPlayer {
 }
 
 export interface ClientFieldState {
-  currentCardCount: number;  // how many cards were just played (face-down)
+  currentCardCount: number;
   declaredNumber: number;
   cardHistoryCount: number;
   faceUpPool: Card[];
   lastPlayerId: string | null;
   doubtType: 'play' | 'discard' | 'counter' | null;
   counteredBy: string | null;
-  revealedCards?: Card[];    // shown after doubt
-  pendingNumbers?: number[]; // Phase 13: Q-Bomber で破壊予定の数字
+  revealedCards?: Card[];
+  pendingNumbers?: number[];
   hasFieldCleared: boolean;
   isEffectActive: boolean;
 }

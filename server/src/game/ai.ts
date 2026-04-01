@@ -87,10 +87,7 @@ export class AIEngine {
     const player = room.players.find(p => p.id === playerId);
     if (!player || player.isOut) return;
     
-    if (this.thinkingPlayers.has(playerId)) {
-      console.log(`AI Logic [${player.name}]: Already thinking. Ignoring redundant call.`);
-      return;
-    }
+    if (this.thinkingPlayers.has(playerId)) return;
     this.thinkingPlayers.add(playerId);
 
     const wrappedOnAction = (actionType: 'play' | 'pass', result?: { success: boolean; skipDoubt?: boolean; error?: string }) => {
@@ -101,9 +98,8 @@ export class AIEngine {
     let session: ort.InferenceSession | null = null;
     try {
       session = await this.getSession();
-    } catch (err) {
-      console.error(`AI Logic [${player.name}]: Failed to get session.`, err);
-    }
+    } catch (err) {}
+
     const stateVector = this.getStateVector(room, player);
     const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
     
@@ -188,7 +184,6 @@ export class AIEngine {
       case 'playing': return 0;
       case 'doubtPhase': return 1;
       case 'counterPhase': return 2;
-      case 'qBombPhase': return 3;
       case 'effectPhase': return 4;
       default: return 0;
     }
@@ -439,7 +434,7 @@ export class AIEngine {
   }
 
   static runEffectDecision(room: Room, onAction: () => void): void {
-    if ((room.phase !== 'effectPhase' && room.phase !== 'qBombPhase') || !room.pendingEffect) return;
+    if (room.phase !== 'effectPhase' || !room.pendingEffect) return;
     const effect = room.pendingEffect;
     const player = room.players.find(p => p.id === effect.playerId);
     if (!player || !player.isAI || player.isOut) return;
@@ -448,7 +443,7 @@ export class AIEngine {
     const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
     setTimeout(async () => {
       try {
-        if ((room.phase !== 'effectPhase' && room.phase !== 'qBombPhase') || room.pendingEffect !== effect) {
+        if (room.phase !== 'effectPhase' || room.pendingEffect !== effect) {
           this.thinkingPlayers.delete(player.id);
           return;
         }
