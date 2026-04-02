@@ -387,10 +387,6 @@ export class GameEngine {
         room.pendingFinishPlayerId = null;
       }
 
-      // Move the revealed lied cards to the Face-Up Graveyard so they don't vanish
-      if (result.revealedCards && result.revealedCards.length > 0) {
-        room.field.faceUpPool.push(...result.revealedCards);
-      }
 
       // Reward: Doubter (winner) gives 0-N cards to Liar (loser)
       room.pendingEffect = {
