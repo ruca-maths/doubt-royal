@@ -52,6 +52,8 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
   }, [hasActed, isMyCards, skipDoubt]);
 
   // Doubt/Counter result overlay
+  const { clearDoubtResult } = useGame();
+
   if (doubtResult && doubtResult.type !== 'noDoubt') {
     const players = gameState?.players || [];
     const isSuccess = doubtResult.type === 'success';
@@ -91,7 +93,10 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
     }
 
     return (
-      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div 
+        className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 cursor-pointer"
+        onClick={clearDoubtResult}
+      >
         <div className={`animate-bounce-in rounded-2xl p-8 text-center glass shadow-2xl ${
           isSuccess || isCounter ? 'border-game-accent/50' : 'border-game-danger/50'
         }`}>
@@ -120,6 +125,9 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
               </div>
             ))}
           </div>
+          <p className="mt-6 text-xs text-gray-500 animate-pulse">
+            画面クリックで閉じる
+          </p>
         </div>
       </div>
     );

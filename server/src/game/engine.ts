@@ -405,6 +405,9 @@ export class GameEngine {
       // Note: We do NOT set liar.isSkipped = true.
       // Setting isSkipped would penalize them by skipping their *next* turn as well.
 
+      // Set turn to winner (Doubter)
+      room.currentPlayerIndex = room.turnOrder.indexOf(result.doubterId);
+
       room.phase = 'effectPhase';
     } else if (result.type === 'failure') {
       GameEngine.addLog(room, 'doubtFailure', result.doubterId, { revealedCards: result.revealedCards });
@@ -464,10 +467,9 @@ export class GameEngine {
           ((room.field.declaredNumber === 8) || 
            (room.field.declaredNumber === 0 && room.field.currentCards.length === 1));
         
-        if (shouldEnterCounterPhase) {
-          (room.pendingEffect as any).startCounterPhaseAfter = true;
-        }
-        
+        // Set turn to winner (Honest Player)
+        room.currentPlayerIndex = room.turnOrder.indexOf(result.honestPlayerId);
+
         room.phase = 'effectPhase';
       }
     } else {

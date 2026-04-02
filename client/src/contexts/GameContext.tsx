@@ -22,6 +22,7 @@ interface GameContextValue {
   // Game
   gameState: ClientGameState | null;
   doubtResult: DoubtResult | null;
+  clearDoubtResult: () => void;
   playCards: (cardIds: string[], declaredNumber: number) => void;
   passTurn: () => void;
   playAgain: () => void;
@@ -100,8 +101,8 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
 
     socket.on('doubt-result', (data: DoubtResult) => {
       setDoubtResult(data);
-      // Show result for 4 seconds to allow animations to complete
-      setTimeout(() => setDoubtResult(null), 4000);
+      // Show result for 2.5 seconds (shortened)
+      setTimeout(() => setDoubtResult(null), 2500);
     });
 
     socket.on('doubt-declared', (data: { playerId: string }) => {
@@ -250,6 +251,8 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
     });
   }, [socket]);
 
+  const clearDoubtResult = useCallback(() => setDoubtResult(null), []);
+
   const clearError = useCallback(() => setError(null), []);
 
   const value: GameContextValue = {
@@ -257,7 +260,7 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
     playerName, setPlayerName,
     roomId, roomInfo,
     createRoom, joinRoom, leaveRoom, startGame, addAiPlayer,
-    gameState, doubtResult,
+    gameState, doubtResult, clearDoubtResult,
     playCards, passTurn, playAgain, declareDoubt, skipDoubt, declareCounter, effectAction,
     error, clearError,
   };
