@@ -30,7 +30,7 @@ except (ImportError, AttributeError):
 try:
     from google.colab import drive
     drive.mount('/content/drive')
-    SAVE_DIR = '/content/drive/MyDrive/doubt_royale_ai_v14'
+    SAVE_DIR = '/content/drive/MyDrive/doubt_royale_ai_v15'
     os.makedirs(SAVE_DIR, exist_ok=True)
 except Exception:
     SAVE_DIR = '.'
@@ -47,10 +47,11 @@ class DynamicRewardSystem:
             'doubt_failure': -1.0,
             'win': 100.0,
             'lose': -30.0,
+            'step': -0.05,
             'pass': -0.02,
             'invalid_action': -0.1,
             'forbidden_finish': -50.0,
-            'multi_play_bonus': 0.5
+            'multi_play_bonus': 0.1
         }
         self.recent_wins = []
         self.last_adj_ep = 0
@@ -76,10 +77,12 @@ class DynamicRewardSystem:
         self.weights['pass'] *= con
         self.weights['bluff_caught'] *= con
         self.weights['honest_play'] *= con
+        self.weights['multi_play_bonus'] *= con
 
         for k in ['bluff_success', 'doubt_success']:
-            self.weights[k] = min(max(self.weights[k], 0.05), 10.0)
+            self.weights[k] = min(max(self.weights[k], 0.05), 1.0)
         self.weights['honest_play'] = min(max(self.weights['honest_play'], 0.01), 0.5)
+        self.weights['multi_play_bonus'] = min(max(self.weights['multi_play_bonus'], 0.01), 0.5)
         for k in ['doubt_failure', 'pass', 'invalid_action', 'bluff_caught']:
             self.weights[k] = min(max(self.weights[k], -10.0), -0.01)
 
