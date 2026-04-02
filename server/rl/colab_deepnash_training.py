@@ -568,7 +568,7 @@ def train():
     opponent_pool = []
     
     start_time = time.time()
-    for ep in range(start_ep, 50001):
+    for ep in range(start_ep, 500001):
         if opponent_pool: env.opponent_policies = [None] + [random.choice(opponent_pool) for _ in range(3)]
         else: env.opponent_policies = [None] + [agent.policy] * 3
 
