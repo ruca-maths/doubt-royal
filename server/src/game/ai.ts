@@ -6,6 +6,7 @@ import { StrategyEngine } from './strategy';
 import * as ort from 'onnxruntime-node';
 import path from 'path';
 
+
 export class AIEngine {
   private static thinkingPlayers = new Set<string>();
   private static session: ort.InferenceSession | null = null;
@@ -31,7 +32,7 @@ export class AIEngine {
   private static getModelPath(): string {
     const cwd = process.cwd();
     const modelNames = [
-      'doubt_royale_v14_ep5000.onnx',
+      'doubt_royale_v14_ep18000.onnx',
       'doubt_royale_v14_latest.onnx',
       'doubt_royale_v13_latest.onnx',
       'doubt_royale_v11_latest.onnx',
