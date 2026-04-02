@@ -17,6 +17,17 @@ import copy
 import time
 
 try:
+    import sympy
+    if not hasattr(sympy, 'core'):
+        raise ImportError("Sympy install is broken")
+except (ImportError, AttributeError):
+    print("Sympy attribute error detected. Fixing environment...")
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "sympy"])
+    import sympy
+
+try:
     from google.colab import drive
     drive.mount('/content/drive')
     SAVE_DIR = '/content/drive/MyDrive/doubt_royale_ai_v14'
@@ -37,9 +48,9 @@ class DynamicRewardSystem:
             'win': 100.0,
             'lose': -30.0,
             'pass': -0.02,
-            'step': -0.01,
-            'invalid_action': -0.5,
-            'forbidden_finish': -50.0 # あがり禁止ペナルティ
+            'invalid_action': -0.1,
+            'forbidden_finish': -50.0,
+            'multi_play_bonus': 0.5
         }
         self.recent_wins = []
         self.last_adj_ep = 0
@@ -121,16 +132,17 @@ class DoubtRoyaleEnv(gym.Env):
             else: idx = card["suit"] * 13 + (card["number"] - 1)
             hand_vec[idx] = 1.0
             
-        others = np.array([len(self.hands[i]) for i in range(self.num_players) if i != player_idx], dtype=np.float32)
-        field_vec = np.array([self.field["number"], self.field["count"], self.field["last_player"]], dtype=np.float32)
+        others = np.array([len(self.hands[i]) / 54.0 for i in range(self.num_players) if i != player_idx], dtype=np.float32)
+        field_vec = np.array([self.field["number"] / 13.0, self.field["count"] / 4.0, (self.field["last_player"] + 1) / 4.0], dtype=np.float32)
         
         phase_map = {'playing':0, 'doubting':1, 'countering':2, 'q_bomb':3, 'card_sel':4}
-        status_vec = np.array([self.is_revolution, self.is_eleven_back, phase_map[self.phase]], dtype=np.float32)
+        status_vec = np.array([self.is_revolution, self.is_eleven_back, phase_map[self.phase] / 4.0], dtype=np.float32)
         
         face_up_counts = np.zeros(14, dtype=np.float32)
         for card in self.face_up_pool:
             cidx = 0 if card["is_joker"] else card["number"]
             face_up_counts[cidx] += 1.0
+        face_up_counts = face_up_counts / 4.0
             
         obs = np.concatenate([hand_vec, field_vec, others, status_vec, face_up_counts])
         return np.pad(obs, (0, 114 - len(obs)))
@@ -153,16 +165,22 @@ class DoubtRoyaleEnv(gym.Env):
         valid = False
         self._add_reward('step')
         if self.phase == 'playing':
-            if action == 0: valid = self._handle_pass(0); self._add_reward('pass')
+            if action == 0: 
+                if self.field["count"] == 0: valid = False
+                else: valid = self._handle_pass(0); self._add_reward('pass')
             elif 1 <= action <= 52: 
                 num = ((action - 1) % 13) + 1
                 cnt = ((action - 1) // 13) + 1
                 valid = self._handle_play(0, num, cnt, False)
-                if valid: self._add_reward('honest_play')
+                if valid: 
+                    self._add_reward('honest_play')
+                    if cnt > 1: self.reward_buffer += self.reward_sys.get_reward('multi_play_bonus') * cnt
             elif 53 <= action <= 104: 
                 num = ((action - 53) % 13) + 1
                 cnt = ((action - 53) // 13) + 1
                 valid = self._handle_play(0, num, cnt, True)
+                if valid and cnt > 1:
+                    self.reward_buffer += self.reward_sys.get_reward('multi_play_bonus') * cnt
         elif self.phase == 'doubting':
             if action == 0: self._resolve_doubt(0, False); valid = True
             elif action == 105: 
@@ -181,7 +199,9 @@ class DoubtRoyaleEnv(gym.Env):
             self._add_reward('invalid_action')
             if self.phase == 'q_bomb': self._apply_q_bomb(1)
             elif self.phase == 'card_sel': self._apply_card_select(0, -1)
-            elif self.phase == 'playing': self._handle_pass(0)
+            elif self.phase == 'playing': 
+                if self.field["count"] == 0: self._force_play(0)
+                else: self._handle_pass(0)
             else: self.active_player = self._next_player(self.active_player)
             
         self._simulate_others()
@@ -347,17 +367,61 @@ class DoubtRoyaleEnv(gym.Env):
         self.active_player = self.turn_player; self.phase = 'playing'
         return True
 
+    def _force_play(self, p_idx):
+        if not self.hands[p_idx]: return
+        rev = self.is_revolution != self.is_eleven_back
+        def str_fn(c):
+             if c["is_joker"]: return 100
+             v = c["number"] - 3 + 13 if c["number"] < 3 else c["number"] - 3
+             return 12 - v if rev else v
+        cards = sorted(self.hands[p_idx], key=str_fn)
+        weakest = cards[0]
+        n = 0 if weakest["is_joker"] else weakest["number"]
+        matching = [c for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) == n]
+        self._handle_play(p_idx, n, len(matching), False)
+
+    def _heuristic_play(self, p_idx):
+        if self.field["count"] == 0:
+            self._force_play(p_idx)
+            return
+        
+        req_cnt = self.field["count"]
+        req_n = self.field["number"]
+        rev = self.is_revolution != self.is_eleven_back
+        def str_fn(num):
+            if num == 0: return 100
+            v = num - 3 + 13 if num < 3 else num - 3
+            return 12 - v if rev else v
+            
+        field_str = str_fn(req_n)
+        
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for c in self.hands[p_idx]:
+           n = 0 if c["is_joker"] else c["number"]
+           groups[n].append(c)
+           
+        for n, cards in groups.items():
+            if len(cards) >= req_cnt and str_fn(n) > field_str and not (req_n == 0 and n == 0):
+                self._handle_play(p_idx, n, req_cnt, False)
+                return
+        
+        self._handle_pass(p_idx)
+
     def _simulate_others(self):
         steps = 0
         while self.active_player != 0 and sum(self.player_out) < self.num_players - 1 and steps < 200:
             p = self.active_player
             if self.opponent_policies and len(self.opponent_policies) > p and self.opponent_policies[p] is not None:
-                with torch.no_grad():
-                    obs_t = torch.FloatTensor(self._get_flat_obs(p)).unsqueeze(0).to(self.device)
-                    probs, _ = self.opponent_policies[p](obs_t)
-                    a = Categorical(probs).sample().item()
+                if random.random() < 0.2:
+                    a = -1
+                else:
+                    with torch.no_grad():
+                        obs_t = torch.FloatTensor(self._get_flat_obs(p)).unsqueeze(0).to(self.device)
+                        probs, _ = self.opponent_policies[p](obs_t)
+                        a = Categorical(probs).sample().item()
             else:
-                if self.phase == 'playing': a = random.choice([0, 1])
+                if self.phase == 'playing': a = -1
                 elif self.phase == 'doubting': a = random.choice([0, 0, 0, 105])
                 elif self.phase == 'countering': a = 0
                 elif self.phase == 'q_bomb': a = 108
@@ -366,16 +430,25 @@ class DoubtRoyaleEnv(gym.Env):
             old_phase = self.phase
             
             if self.phase == 'playing':
-                if a == 0: self._handle_pass(p)
+                if a == -1: self._heuristic_play(p)
+                elif a == 0: 
+                    if self.field["count"] == 0: self._force_play(p)
+                    else: self._handle_pass(p)
                 elif 1 <= a <= 52: 
                     num = ((a - 1) % 13) + 1
                     cnt = ((a - 1) // 13) + 1
-                    if not self._handle_play(p, num, cnt, False): self._handle_pass(p)
+                    if not self._handle_play(p, num, cnt, False): 
+                        if self.field["count"] == 0: self._force_play(p)
+                        else: self._handle_pass(p)
                 elif 53 <= a <= 104: 
                     num = ((a - 53) % 13) + 1
                     cnt = ((a - 53) // 13) + 1
-                    if not self._handle_play(p, num, cnt, True): self._handle_pass(p)
-                else: self._handle_pass(p)
+                    if not self._handle_play(p, num, cnt, True): 
+                        if self.field["count"] == 0: self._force_play(p)
+                        else: self._handle_pass(p)
+                else: 
+                     if self.field["count"] == 0: self._force_play(p)
+                     else: self._handle_pass(p)
             elif self.phase == 'doubting':
                 if a == 105: self._resolve_doubt(p, True)
                 else: self._resolve_doubt(p, False)
