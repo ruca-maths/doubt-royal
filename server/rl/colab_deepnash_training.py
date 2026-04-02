@@ -77,8 +77,9 @@ class DynamicRewardSystem:
         self.weights['bluff_caught'] *= con
         self.weights['honest_play'] *= con
 
-        for k in ['honest_play', 'bluff_success', 'doubt_success']:
+        for k in ['bluff_success', 'doubt_success']:
             self.weights[k] = min(max(self.weights[k], 0.05), 10.0)
+        self.weights['honest_play'] = min(max(self.weights['honest_play'], 0.01), 0.5)
         for k in ['doubt_failure', 'pass', 'invalid_action', 'bluff_caught']:
             self.weights[k] = min(max(self.weights[k], -10.0), -0.01)
 
