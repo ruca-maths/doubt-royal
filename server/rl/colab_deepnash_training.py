@@ -485,19 +485,27 @@ def train():
         if ep % 100 == 0:
             wr = sum(reward_sys.recent_wins) / len(reward_sys.recent_wins) if reward_sys.recent_wins else 0
             print(f"EP {ep} | WinRate: {wr:.2%} | LastR: {ep_reward:.2f} | Time: {int(time.time()-start_time)}s")
-
-        if ep % 1000 == 0:
+            # 100エピソードごとに自動保存 (切断対策)
             torch.save({
                 'episode': ep,
                 'model_state_dict': agent.policy.state_dict(),
                 'optimizer_state_dict': agent.optimizer.state_dict()
             }, ckpt)
-            torch.onnx.export(agent.policy, torch.randn(1, 100).to(DEVICE), os.path.join(SAVE_DIR, f"doubt_royale_v14_ep{ep}.onnx"))
+            print(f"💾 チェックポイントを自動保存しました: {ckpt}")
+
+        if ep % 1000 == 0:
+            # 1000エピソードごとに最新のONNXを出力
+            latest_onnx = os.path.join(SAVE_DIR, "doubt_royale_latest.onnx")
+            torch.onnx.export(agent.policy, torch.randn(1, 114).to(DEVICE), latest_onnx)
+            # 履歴用にも保存
+            torch.onnx.export(agent.policy, torch.randn(1, 114).to(DEVICE), os.path.join(SAVE_DIR, f"doubt_royale_v15_ep{ep}.onnx"))
+            
             agent.ref_policy.load_state_dict(agent.policy.state_dict())
-            new_opp = ActorCriticNet(100, 100).to(DEVICE)
+            new_opp = ActorCriticNet(114, 176).to(DEVICE)
             new_opp.load_state_dict(agent.policy.state_dict()); new_opp.eval()
             opponent_pool.append(new_opp)
             if len(opponent_pool) > 10: opponent_pool.pop(0)
+            print(f"🚀 ONNXモデルを書き出しました: {latest_onnx}")
 
 if __name__ == "__main__":
     train()
