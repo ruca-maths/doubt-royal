@@ -294,10 +294,13 @@ class DoubtRoyaleEnv(gym.Env):
         liar = self.field["last_player"]
         cards = self.field["cards"]
         n_cards = len(cards)
-        is_lie = any((0 if c["is_joker"] else c["number"]) != self.field["number"] for c in cards)
+        # ジョーカー（is_joker=True）は、どの数字の宣言に対しても「正直」とみなすように修正
+        is_lie = any(not c["is_joker"] and c["number"] != self.field["number"] for c in cards)
         
         if is_lie:
             self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
+            # 見破られた嘘のカードを墓地へ送る（消滅バグの修正）
+            self.face_up_pool.extend(cards)
             if liar == 0: self._add_reward('bluff_caught') # Player 0がバレた
             elif p_idx == 0: pass # step側で成功報酬処理済み
             
