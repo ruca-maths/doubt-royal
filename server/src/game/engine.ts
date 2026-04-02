@@ -380,6 +380,17 @@ export class GameEngine {
 
       // Cancel any deferred effect (the play was a lie, so no effect should occur)
       room.deferredEffect = null;
+      
+      // If the liar caught was trying to finish, cancel the finish
+      if (room.pendingFinishPlayerId === result.liarId) {
+        console.log(`[Doubt SUCCESS] Liar ${result.liarId} was caught on their last card. Cancellation of winning status.`);
+        room.pendingFinishPlayerId = null;
+      }
+
+      // Move the revealed lied cards to the Face-Up Graveyard so they don't vanish
+      if (result.revealedCards && result.revealedCards.length > 0) {
+        room.field.faceUpPool.push(...result.revealedCards);
+      }
 
       // Reward: Doubter (winner) gives 0-N cards to Liar (loser)
       room.pendingEffect = {
