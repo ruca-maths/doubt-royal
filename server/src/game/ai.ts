@@ -115,12 +115,14 @@ export class AIEngine {
         
         let action: { type: 'play' | 'pass', cards?: Card[], declaredNumber?: number };
 
-        if (StrategyEngine.hasData()) {
+        if (session) {
           try {
-            action = StrategyEngine.decidePlay(playerId, room, player);
-            if (action.type === 'play' && action.cards) {
+            const result = await this.predict(session, stateVector);
+            action = this.mapActionToGame(room, player, result);
+            
+            if (action.type === 'play') {
               const validation = validatePlayCards(
-                action.cards, 
+                action.cards!, 
                 action.declaredNumber!, 
                 { 
                   currentCardCount: room.field.currentCards.length, 
@@ -129,19 +131,27 @@ export class AIEngine {
                 },
                 room.rules
               );
-              if (!validation.valid) action = this.decidePlayActionHeuristic(room, player);
+              if (!validation.valid) {
+                 if (StrategyEngine.hasData()) {
+                    action = StrategyEngine.decidePlay(playerId, room, player);
+                 } else {
+                    action = this.decidePlayActionHeuristic(room, player);
+                 }
+              }
             }
           } catch (e) {
-            action = this.decidePlayActionHeuristic(room, player);
+             if (StrategyEngine.hasData()) {
+                action = StrategyEngine.decidePlay(playerId, room, player);
+             } else {
+                action = this.decidePlayActionHeuristic(room, player);
+             }
           }
-        } else if (session) {
+        } else if (StrategyEngine.hasData()) {
           try {
-            const result = await this.predict(session, stateVector);
-            action = this.mapActionToGame(room, player, result);
-            
-            if (action.type === 'play') {
+            action = StrategyEngine.decidePlay(playerId, room, player);
+            if (action.type === 'play' && action.cards) {
               const validation = validatePlayCards(
-                action.cards!, 
+                action.cards, 
                 action.declaredNumber!, 
                 { 
                   currentCardCount: room.field.currentCards.length, 
@@ -161,7 +171,12 @@ export class AIEngine {
         
         const isFieldEmpty = room.field.currentCards.length === 0 || room.field.lastPlayerId === null || room.field.lastPlayerId === player.id;
         if (action.type === 'pass' && isFieldEmpty && player.hand.length > 0) {
-          action = this.decidePlayActionHeuristic(room, player);
+          if (StrategyEngine.hasData()) {
+             action = StrategyEngine.decidePlay(playerId, room, player);
+             if (action.type === 'pass') action = this.decidePlayActionHeuristic(room, player);
+          } else {
+             action = this.decidePlayActionHeuristic(room, player);
+          }
         }
 
         if (action.type === 'pass') {
@@ -458,7 +473,7 @@ export class AIEngine {
       });
       const numToPlay = availableNumbers[0];
       const cards = handByNumber.get(numToPlay)!;
-      return { type: 'play', cards: [cards[0]], declaredNumber: numToPlay };
+      return { type: 'play', cards: cards, declaredNumber: numToPlay };
     } else {
       const targetCount = fieldCardsCount;
       const currentDeclared = room.field.declaredNumber;
@@ -470,8 +485,9 @@ export class AIEngine {
         }
       }
       if (isFieldEmpty && player.hand.length > 0) {
-        const firstCard = player.hand[0];
-        return { type: 'play', cards: [firstCard], declaredNumber: firstCard.isJoker ? 0 : firstCard.number };
+        const numToPlay = player.hand[0].isJoker ? 0 : player.hand[0].number;
+        const cardsToPlay = handByNumber.get(numToPlay) || [player.hand[0]];
+        return { type: 'play', cards: cardsToPlay, declaredNumber: numToPlay };
       }
       return { type: 'pass' };
     }

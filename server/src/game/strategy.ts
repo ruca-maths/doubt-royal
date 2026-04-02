@@ -396,13 +396,16 @@ export class StrategyEngine {
       || room.field.lastPlayerId === null
       || room.field.lastPlayerId === player.id;
     const fieldCount = room.field.currentCards.length;
-    const targetCount = isFieldEmpty ? 1 : fieldCount;
 
     // 計画がなければ立案
     let plan = this.plans.get(playerId);
     if (!plan || !plan.isValid) {
       plan = this.planPlaySequence(playerId, player.hand, room.rules, fieldCount);
     }
+
+    // もし場が空ならターゲット枚数はプランのカード全枚数、そうでないなら場に出ている枚数
+    const planTargetCount = (plan.currentStepIndex < plan.steps.length) ? plan.steps[plan.currentStepIndex].cards.length : 1;
+    const targetCount = isFieldEmpty ? planTargetCount : fieldCount;
 
     // ===== 3.2.1 計画通り続行可能かチェック =====
     if (plan.currentStepIndex < plan.steps.length) {
@@ -415,9 +418,9 @@ export class StrategyEngine {
 
       if (stillHasCards) {
         // 場の状況に合うかバリデーション
-        const cardsToPlay = step.cards.slice(0, targetCount);
+        const cardsToPlay = isFieldEmpty ? step.cards : step.cards.slice(0, targetCount);
         if (cardsToPlay.length === targetCount || isFieldEmpty) {
-          const playCards = isFieldEmpty ? [step.cards[0]] : cardsToPlay;
+          const playCards = cardsToPlay;
 
           if (!isFieldEmpty) {
             // 場より強いか確認
@@ -461,7 +464,7 @@ export class StrategyEngine {
     // 再立案後、出せるステップを探す
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i];
-      const cardsToPlay = isFieldEmpty ? [step.cards[0]] : step.cards.slice(0, targetCount);
+      const cardsToPlay = isFieldEmpty ? step.cards : step.cards.slice(0, targetCount);
 
       if (!isFieldEmpty && cardsToPlay.length !== targetCount) continue;
 
@@ -504,14 +507,22 @@ export class StrategyEngine {
 
     // パス（場が空の場合はパス不可 → 何でもいいから出す）
     if (isFieldEmpty && player.hand.length > 0) {
-      const card = player.hand[0];
-      const num = card.isJoker ? 0 : card.number;
+      // 揃っているなら複数枚まとめて出す
+      const handByNumber = new Map<number, Card[]>();
+      player.hand.forEach(c => {
+        const num = c.isJoker ? 0 : c.number;
+        if (!handByNumber.has(num)) handByNumber.set(num, []);
+        handByNumber.get(num)!.push(c);
+      });
+      const numToPlay = player.hand[0].isJoker ? 0 : player.hand[0].number;
+      const fallbackCards = handByNumber.get(numToPlay) || [player.hand[0]];
+      
       // 禁止上がりでないか
-      if (player.hand.length > 1 || !checkForbiddenFinish(num, [card], room.rules.isRevolution)) {
-        return { type: 'play', cards: [card], declaredNumber: num };
+      if (player.hand.length - fallbackCards.length > 0 || !checkForbiddenFinish(numToPlay, fallbackCards, room.rules.isRevolution)) {
+        return { type: 'play', cards: fallbackCards, declaredNumber: numToPlay };
       }
       // 全部禁止上がり → 仕方なく出す
-      return { type: 'play', cards: [card], declaredNumber: num };
+      return { type: 'play', cards: fallbackCards, declaredNumber: numToPlay };
     }
 
     return { type: 'pass' };
