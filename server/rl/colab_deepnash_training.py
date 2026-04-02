@@ -31,12 +31,13 @@ class DynamicRewardSystem:
         self.weights = {
             'honest_play': 0.1,
             'bluff_success': 0.2,
-            'bluff_caught': -0.3,
-            'doubt_success': 1.0,
+            'bluff_caught': -2.0,
+            'doubt_success': 0.3,
             'doubt_failure': -1.0,
             'win': 100.0,
             'lose': -30.0,
             'pass': -0.02,
+            'step': -0.01,
             'invalid_action': -0.5,
             'forbidden_finish': -50.0 # あがり禁止ペナルティ
         }
@@ -150,6 +151,7 @@ class DoubtRoyaleEnv(gym.Env):
 
         # プレイヤー0のターン
         valid = False
+        self._add_reward('step')
         if self.phase == 'playing':
             if action == 0: valid = self._handle_pass(0); self._add_reward('pass')
             elif 1 <= action <= 52: 
@@ -263,8 +265,7 @@ class DoubtRoyaleEnv(gym.Env):
             return True
         else:
             self.hands[p_idx].extend(self.field["cards"])
-            if p_idx == 0: self.player_lives[0] -= 1; # ダウト失敗ペナルティはstep側
-            elif liar == 0: self._add_reward('bluff_success') # 自分のブラフに相手が勝手にダウト自爆した
+            if liar == 0 and p_idx != 0: self._add_reward('bluff_success') # 自分のプレイに相手が勝手にダウト自爆した
             self.player_lives[p_idx] -= 1
             if self.player_lives[p_idx] <= 0: self.player_out[p_idx] = True
             self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
