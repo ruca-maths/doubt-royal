@@ -191,7 +191,7 @@ export class AIEngine {
   }
 
   private static async predict(session: ort.InferenceSession, state: number[]): Promise<number> {
-    const input = new ort.Tensor('float32', new Float32Array(state), [1, 100]);
+    const input = new ort.Tensor('float32', new Float32Array(state), [1, 114]);
     const results = await session.run({ input });
     let outputData: Float32Array;
     if (results.output) {
@@ -211,18 +211,30 @@ export class AIEngine {
 
   private static mapActionToGame(room: Room, player: Player, modelAction: number): { type: 'play' | 'pass', cards?: Card[], declaredNumber?: number } {
     if (modelAction === 0) return { type: 'pass' };
+    
     let declaredNum = 0;
     let isLie = false;
-    if (modelAction >= 1 && modelAction <= 13) {
-        declaredNum = modelAction;
-    } else if (modelAction >= 16 && modelAction <= 28) {
-        declaredNum = modelAction - 15;
-        isLie = true;
+    let computedTargetCount = 1;
+
+    // Honest Play (1~52)
+    if (modelAction >= 1 && modelAction <= 52) {
+      declaredNum = ((modelAction - 1) % 13) + 1;
+      computedTargetCount = Math.floor((modelAction - 1) / 13) + 1;
+      isLie = false;
+    } 
+    // Bluff Play (53~104)
+    else if (modelAction >= 53 && modelAction <= 104) {
+      declaredNum = ((modelAction - 53) % 13) + 1;
+      computedTargetCount = Math.floor((modelAction - 53) / 13) + 1;
+      isLie = true;
     } else {
-        return { type: 'pass' };
+      return { type: 'pass' };
     }
+
     const fieldCardsCount = room.field.currentCards.length;
-    const targetCount = fieldCardsCount === 0 || room.field.lastPlayerId === null || room.field.lastPlayerId === player.id ? 1 : fieldCardsCount;
+    // 場に出ている枚数があれば、その枚数に合わせる必要がある
+    const targetCount = fieldCardsCount > 0 ? fieldCardsCount : computedTargetCount;
+
     const matchingCards = player.hand.filter(c => (c.isJoker ? 0 : c.number) === declaredNum);
     if (!isLie && matchingCards.length >= targetCount) {
         return { type: 'play', cards: matchingCards.slice(0, targetCount), declaredNumber: declaredNum };
@@ -237,7 +249,7 @@ export class AIEngine {
   }
 
   private static getStateVector(room: Room, player: Player): number[] {
-    const vec = new Array(100).fill(0);
+    const vec = new Array(114).fill(0);
     player.hand.forEach(c => {
         let idx = -1;
         const cardMatch = c.id.match(/card-(\d+)/);
@@ -263,6 +275,13 @@ export class AIEngine {
     vec[60] = room.rules.isRevolution ? 1 : 0;
     vec[61] = room.rules.isElevenBack ? 1 : 0;
     vec[62] = this.getPhaseIndex(room.phase);
+
+    // faceUpPool information (14 dimensions: idx 63-76)
+    room.field.faceUpPool.forEach(c => {
+        const num = c.isJoker ? 0 : c.number;
+        vec[63 + num] += 1;
+    });
+
     return vec;
   }
 
@@ -284,22 +303,44 @@ export class AIEngine {
             return;
           }
           let willDoubt = false;
-          if (StrategyEngine.hasData()) {
-            try {
-              const result = StrategyEngine.shouldDoubt(ai.id, room.field.declaredNumber, room.field.currentCards.length, room.field.faceUpPool, ai.hand, room);
-              willDoubt = result.doubt;
-            } catch (e) {
-              willDoubt = Math.random() < 0.1;
+          
+          // 1. 確定ダウト（100%証拠に基づく防波堤ロジック）
+          const decNum = room.field.declaredNumber;
+          const maxCards = decNum === 0 ? 2 : 4;
+          const faceUpCount = room.field.faceUpPool.filter(c => (c.isJoker ? 0 : c.number) === decNum).length;
+          const myCount = ai.hand.filter(c => (c.isJoker ? 0 : c.number) === decNum).length;
+          const playedCount = room.field.currentCards.length;
+          
+          let isObviousLie = (faceUpCount + myCount + playedCount > maxCards);
+          
+          // 1-2. スペ3カウンターに対する確実なダウト
+          if (room.field.doubtType === 'counter' && decNum === 3 && room.field.currentCards.length === 1) {
+            if (ai.hand.some(c => c.suit === 'spade' && c.number === 3)) {
+              isObviousLie = true;
             }
-          } else if (session) {
-            try {
-              const action = await this.predict(session, stateVector);
-              willDoubt = (action === 14);
-            } catch (e) {
-              willDoubt = Math.random() < 0.1;
-            }
+          }
+
+          if (isObviousLie) {
+            willDoubt = true; // モデルの推論を無視して絶対ダウト
           } else {
-            willDoubt = Math.random() < 0.1;
+            // 2. 確定ではない場合、ルールベース or AIモデルを使用
+            if (StrategyEngine.hasData()) {
+              try {
+                const result = StrategyEngine.shouldDoubt(ai.id, room.field.declaredNumber, room.field.currentCards.length, room.field.faceUpPool, ai.hand, room);
+                willDoubt = result.doubt;
+              } catch (e) {
+                willDoubt = Math.random() < 0.1;
+              }
+            } else if (session) {
+              try {
+                const action = await this.predict(session, stateVector);
+                willDoubt = (action === 105);
+              } catch (e) {
+                willDoubt = Math.random() < 0.1;
+              }
+            } else {
+              willDoubt = Math.random() < 0.1;
+            }
           }
           if (willDoubt) {
             const success = DoubtManager.registerDoubt(room, ai.id);
@@ -341,16 +382,16 @@ export class AIEngine {
         if (session) {
           try {
             counterAction = await this.predict(session, stateVector);
-            willCounter = (counterAction === 29 || counterAction === 30);
+            willCounter = (counterAction === 106 || counterAction === 107);
           } catch (e) {}
         }
         let counterCards: Card[] = [];
         if (willCounter) {
-          if (counterAction === 29 && room.field.declaredNumber === 8) {
+          if (counterAction === 106 && room.field.declaredNumber === 8) {
             const fours = player.hand.filter(c => c.number === 4);
             const requiredCount = room.field.currentCards.length + 1;
             if (fours.length >= requiredCount) counterCards = fours.slice(0, requiredCount);
-          } else if (counterAction === 30 && room.field.declaredNumber === 0 && room.field.currentCards.length === 1) {
+          } else if (counterAction === 107 && room.field.declaredNumber === 0 && room.field.currentCards.length === 1) {
             const spade3 = player.hand.find(c => c.suit === 'spade' && c.number === 3);
             if (spade3) counterCards = [spade3];
           }
@@ -463,8 +504,8 @@ export class AIEngine {
           case 'tenDiscard': {
             const count = Math.min(effect.count, player.hand.length);
             if (count > 0) {
-              if (modelAction >= 45 && modelAction <= 98) {
-                const cardIdx = Math.min(modelAction - 45, player.hand.length - 1);
+              if (modelAction >= 122 && modelAction <= 175) {
+                const cardIdx = Math.min(modelAction - 122, player.hand.length - 1);
                 cardIds.push(player.hand[cardIdx].id);
               } else {
                 const sortedHand = [...player.hand].sort((a, b) => {
@@ -501,8 +542,8 @@ export class AIEngine {
             break;
           }
           case 'queenBomber': {
-            if (modelAction >= 31 && modelAction <= 44) {
-               targetData = { numbers: [modelAction - 30 === 14 ? 0 : modelAction - 30] };
+            if (modelAction >= 108 && modelAction <= 121) {
+               targetData = { numbers: [modelAction - 107 === 14 ? 0 : modelAction - 107] };
             } else {
                targetData = { numbers: [Math.floor(Math.random() * 13) + 1] };
             }

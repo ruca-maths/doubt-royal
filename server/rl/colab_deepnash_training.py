@@ -78,10 +78,17 @@ class DoubtRoyaleEnv(gym.Env):
         self.opponent_policies = None
         self.device = DEVICE
         
-        # 0: Pass/Decline, 1-13: Honest, 14: Doubt, 15: -, 16-28: Bluff
-        # 29: Counter 4, 30: Counter Spade 3, 31-43: Q Bomb Num (1-13), 44: Q Bomb Joker
-        # 45-98: Select Card Index (0-53)
-        self.action_space = spaces.Discrete(100)
+        # Action Space Dimension: 176
+        # 0: Pass/Decline
+        # 1-52: Honest Play (13 nums * 4 counts)
+        # 53-104: Bluff Play (13 nums * 4 counts)
+        # 105: Doubt
+        # 106: Counter 4
+        # 107: Counter Spade 3
+        # 108-120: Q Bomb Num (1-13)
+        # 121: Q Bomb Joker
+        # 122-175: Select Card Index (0-53)
+        self.action_space = spaces.Discrete(176)
         
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -119,8 +126,13 @@ class DoubtRoyaleEnv(gym.Env):
         phase_map = {'playing':0, 'doubting':1, 'countering':2, 'q_bomb':3, 'card_sel':4}
         status_vec = np.array([self.is_revolution, self.is_eleven_back, phase_map[self.phase]], dtype=np.float32)
         
-        obs = np.concatenate([hand_vec, field_vec, others, status_vec])
-        return np.pad(obs, (0, 100 - len(obs)))
+        face_up_counts = np.zeros(14, dtype=np.float32)
+        for card in self.face_up_pool:
+            cidx = 0 if card["is_joker"] else card["number"]
+            face_up_counts[cidx] += 1.0
+            
+        obs = np.concatenate([hand_vec, field_vec, others, status_vec, face_up_counts])
+        return np.pad(obs, (0, 114 - len(obs)))
 
     def _add_reward(self, event):
         self.reward_buffer += self.reward_sys.get_reward(event)
@@ -140,24 +152,28 @@ class DoubtRoyaleEnv(gym.Env):
         valid = False
         if self.phase == 'playing':
             if action == 0: valid = self._handle_pass(0); self._add_reward('pass')
-            elif 1 <= action <= 13: 
-                valid = self._handle_play(0, action, False)
+            elif 1 <= action <= 52: 
+                num = ((action - 1) % 13) + 1
+                cnt = ((action - 1) // 13) + 1
+                valid = self._handle_play(0, num, cnt, False)
                 if valid: self._add_reward('honest_play')
-            elif 16 <= action <= 28: 
-                valid = self._handle_play(0, action - 15, True) # 成功報酬は他人のダウトフェーズ終了時に入る
+            elif 53 <= action <= 104: 
+                num = ((action - 53) % 13) + 1
+                cnt = ((action - 53) // 13) + 1
+                valid = self._handle_play(0, num, cnt, True)
         elif self.phase == 'doubting':
             if action == 0: self._resolve_doubt(0, False); valid = True
-            elif action == 14: 
+            elif action == 105: 
                 suc = self._resolve_doubt(0, True); valid = True
                 self._add_reward('doubt_success' if suc else 'doubt_failure')
         elif self.phase == 'countering':
             if action == 0: self._resolve_counter(0, 0); valid = True
-            elif action == 29: valid = self._resolve_counter(0, 4)
-            elif action == 30: valid = self._resolve_counter(0, 3)
+            elif action == 106: valid = self._resolve_counter(0, 4)
+            elif action == 107: valid = self._resolve_counter(0, 3)
         elif self.phase == 'q_bomb':
-            if 31 <= action <= 44: self._apply_q_bomb(action - 30 if action <= 43 else 0); valid = True
+            if 108 <= action <= 121: self._apply_q_bomb(action - 107 if action <= 120 else 0); valid = True
         elif self.phase == 'card_sel':
-            if 45 <= action <= 98: valid = self._apply_card_select(0, action - 45)
+            if 122 <= action <= 175: valid = self._apply_card_select(0, action - 122)
             
         if not valid:
             self._add_reward('invalid_action')
@@ -192,15 +208,25 @@ class DoubtRoyaleEnv(gym.Env):
         self.active_player = self.turn_player
         return True
 
-    def _handle_play(self, p_idx, num, lie):
+    def _handle_play(self, p_idx, num, cnt, lie):
         if not self.hands[p_idx]: return False
-        if not lie:
-            cards = [c for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) == num]
-            if not cards: cards = [self.hands[p_idx][0]]
-        else:
-            cards = [self.hands[p_idx][0]]
+        
+        # 既に出ている場合は枚数を合わせる必要がある
+        if self.field["count"] > 0 and cnt != self.field["count"]:
+            return False
             
-        cnt = max(1, self.field["count"]); cards = cards[:cnt]
+        if not lie:
+            matching = [c for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) == num]
+            if len(matching) < cnt: return False
+            cards = matching[:cnt]
+        else:
+            other_cards = [c for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) != num]
+            if len(other_cards) < cnt:
+                if len(self.hands[p_idx]) < cnt: return False
+                cards = self.hands[p_idx][:cnt]
+            else:
+                cards = other_cards[:cnt]
+                
         self.hands[p_idx] = [c for c in self.hands[p_idx] if c["id"] not in [cp["id"] for cp in cards]]
         self.field.update({"number": num, "count": len(cards), "last_player": p_idx, "cards": cards})
         if len(cards) >= 4: self.is_revolution = not self.is_revolution
@@ -331,36 +357,40 @@ class DoubtRoyaleEnv(gym.Env):
                     a = Categorical(probs).sample().item()
             else:
                 if self.phase == 'playing': a = random.choice([0, 1])
-                elif self.phase == 'doubting': a = random.choice([0, 0, 0, 14])
+                elif self.phase == 'doubting': a = random.choice([0, 0, 0, 105])
                 elif self.phase == 'countering': a = 0
-                elif self.phase == 'q_bomb': a = 31
-                else: a = 45
+                elif self.phase == 'q_bomb': a = 108
+                else: a = 122
                 
             old_phase = self.phase
             
             if self.phase == 'playing':
                 if a == 0: self._handle_pass(p)
-                elif 1 <= a <= 13: 
-                    if not self._handle_play(p, a, False): self._handle_pass(p)
-                elif 16 <= a <= 28: 
-                    if not self._handle_play(p, a - 15, True): self._handle_pass(p)
+                elif 1 <= a <= 52: 
+                    num = ((a - 1) % 13) + 1
+                    cnt = ((a - 1) // 13) + 1
+                    if not self._handle_play(p, num, cnt, False): self._handle_pass(p)
+                elif 53 <= a <= 104: 
+                    num = ((a - 53) % 13) + 1
+                    cnt = ((a - 53) // 13) + 1
+                    if not self._handle_play(p, num, cnt, True): self._handle_pass(p)
                 else: self._handle_pass(p)
             elif self.phase == 'doubting':
-                if a == 14: self._resolve_doubt(p, True)
+                if a == 105: self._resolve_doubt(p, True)
                 else: self._resolve_doubt(p, False)
             elif self.phase == 'countering':
-                if a == 29: self._resolve_counter(p, 4)
-                elif a == 30: self._resolve_counter(p, 3)
+                if a == 106: self._resolve_counter(p, 4)
+                elif a == 107: self._resolve_counter(p, 3)
                 else: self._resolve_counter(p, 0)
             elif self.phase == 'q_bomb':
-                self._apply_q_bomb(a - 30 if 31 <= a <= 44 else 1)
+                self._apply_q_bomb(a - 107 if 108 <= a <= 120 else 0)
             elif self.phase == 'card_sel':
-                self._apply_card_select(p, a - 45 if 45 <= a <= 98 else -1)
+                self._apply_card_select(p, a - 122 if 122 <= a <= 175 else -1)
                 
             steps += 1
 
 class ActorCriticNet(nn.Module):
-    def __init__(self, obs_dim=100, action_dim=100):
+    def __init__(self, obs_dim=114, action_dim=176):
         super().__init__()
         self.fc1 = nn.Linear(obs_dim, 256)
         self.fc2 = nn.Linear(256, 256)
@@ -411,7 +441,7 @@ class DeepNashAgent:
 def train():
     reward_sys = DynamicRewardSystem()
     env = DoubtRoyaleEnv(reward_sys)
-    agent = DeepNashAgent(100, 100)
+    agent = DeepNashAgent(114, 176)
     
     start_ep = 1
     ckpt = os.path.join(SAVE_DIR, "deepnash_policy_latest.pth")
