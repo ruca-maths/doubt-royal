@@ -32,7 +32,7 @@ export class AIEngine {
   private static getModelPath(): string {
     const cwd = process.cwd();
     const modelNames = [
-      'doubt_royale_v14_ep18000.onnx',
+      'doubt_royale_v14_ep30000.onnx',
       'doubt_royale_v14_latest.onnx',
       'doubt_royale_v13_latest.onnx',
       'doubt_royale_v11_latest.onnx',
