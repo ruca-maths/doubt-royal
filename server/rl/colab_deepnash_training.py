@@ -271,25 +271,48 @@ class DoubtRoyaleEnv(gym.Env):
             else: self._apply_effects()
         elif self.phase == 'countering': self._apply_effects()
 
+    def _give_worst_cards(self, giver, receiver, max_count):
+        count = min(max_count, len(self.hands[giver]))
+        if count == 0: return
+        rev = self.is_revolution != self.is_eleven_back
+        def str_fn(c):
+             if c["is_joker"]: return 100
+             v = c["number"] - 3 + 13 if c["number"] < 3 else c["number"] - 3
+             return 12 - v if rev else v
+        cards = sorted(self.hands[giver], key=str_fn)
+        to_give = cards[:count]
+        self.hands[giver] = [c for c in self.hands[giver] if c["id"] not in [tg["id"] for tg in to_give]]
+        self.hands[receiver].extend(to_give)
+
     def _resolve_doubt(self, p_idx, is_doubt):
         if not is_doubt:
             self.ask_idx += 1; self._set_ask_player(); return False
             
         liar = self.field["last_player"]
-        is_lie = any((0 if c["is_joker"] else c["number"]) != self.field["number"] for c in self.field["cards"])
+        cards = self.field["cards"]
+        n_cards = len(cards)
+        is_lie = any((0 if c["is_joker"] else c["number"]) != self.field["number"] for c in cards)
+        
         if is_lie:
-            self.hands[liar].extend(self.field["cards"])
-            if liar == 0: self._add_reward('bluff_caught') # Player 0がバレた
-            elif p_idx == 0: pass # 自分がダウトに成功した報酬はstep側で処理済み
             self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
+            if liar == 0: self._add_reward('bluff_caught') # Player 0がバレた
+            elif p_idx == 0: pass # step側で成功報酬処理済み
+            
+            self.player_lives[liar] -= 1
+            if self.player_lives[liar] <= 0: self.player_out[liar] = True
+            
+            self._give_worst_cards(p_idx, liar, n_cards)
+            
             self.turn_player = self._next_player(self.turn_player); self.active_player = self.turn_player; self.phase = 'playing'
             return True
         else:
-            self.hands[p_idx].extend(self.field["cards"])
-            if liar == 0 and p_idx != 0: self._add_reward('bluff_success') # 自分のプレイに相手が勝手にダウト自爆した
+            if liar == 0 and p_idx != 0: self._add_reward('bluff_success') # 相手の自爆
             self.player_lives[p_idx] -= 1
             if self.player_lives[p_idx] <= 0: self.player_out[p_idx] = True
-            self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
+            
+            self._give_worst_cards(liar, p_idx, n_cards)
+            
+            # Honest cards stay on the field
             self.turn_player = self._next_player(self.turn_player); self.active_player = self.turn_player; self.phase = 'playing'
             return False
 
