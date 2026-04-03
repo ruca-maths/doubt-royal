@@ -389,6 +389,15 @@ export class GameEngine {
         room.pendingFinishPlayerId = null;
       }
 
+      // Immediately restore liar to active state if they were already marked as isOut
+      const liarPlayer = room.players.find(p => p.id === result.liarId);
+      if (liarPlayer && liarPlayer.isOut) {
+        console.log(`[Doubt SUCCESS] Instantly restoring player ${liarPlayer.id} to active state.`);
+        liarPlayer.isOut = false;
+        liarPlayer.rank = null;
+        room.finishOrder = room.finishOrder.filter(id => id !== liarPlayer.id);
+      }
+
 
       // Reward: Doubter (winner) gives 0-N cards to Liar (loser)
       room.pendingEffect = {
