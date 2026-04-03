@@ -70,6 +70,9 @@ export class DoubtManager {
   static registerCounter(room: Room, playerId: string): boolean {
     if (playerId === room.field.lastPlayerId) return false;
     
+    const player = room.players.find(p => p.id === playerId);
+    if (!player || player.isOut) return false;
+
     room.field.counteredBy = playerId;
     return true;
   }
