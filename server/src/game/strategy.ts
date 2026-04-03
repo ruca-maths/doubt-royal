@@ -541,7 +541,7 @@ export class StrategyEngine {
     rules: RulesState
   ): { cards: Card[]; declaredNumber: number } | null {
     // 場より強い数字でブラフ候補を列挙
-    const candidates: number[] = [];
+    let candidates: number[] = [];
     for (let num = 1; num <= 13; num++) {
       const strength = getCardStrength(num, rules);
       const fieldStrength = getCardStrength(field.declaredNumber, rules);
@@ -553,6 +553,14 @@ export class StrategyEngine {
     if (field.declaredNumber !== 0) {
       candidates.push(0);
     }
+
+    // Filter out numbers fully exposed in faceUpPool (Q-Bomber destroyed)
+    candidates = candidates.filter(num => {
+      const maxCards = num === 0 ? 2 : 4;
+      const faceUpCount = field.faceUpPool.filter(c => (c.isJoker ? 0 : c.number) === num).length;
+      const myCount = hand.filter(c => (c.isJoker ? 0 : c.number) === num).length;
+      return !((faceUpCount + myCount >= maxCards) && myCount === 0);
+    });
 
     if (candidates.length === 0) return null;
 

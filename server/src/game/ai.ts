@@ -184,6 +184,20 @@ export class AIEngine {
           }
         }
 
+        // Strategic pass: if AI can only bluff (no honest play), sometimes pass instead
+        if (action.type === 'play' && action.cards && !isFieldEmpty) {
+          const declaredNum = action.declaredNumber!;
+          const isHonest = action.cards.every(c => (c.isJoker ? 0 : c.number) === declaredNum);
+          const isJokerPlay = declaredNum === 0;
+          if (!isHonest || isJokerPlay) {
+            // Pass ~40% of the time when bluffing, ~60% when playing Joker
+            const passChance = isJokerPlay ? 0.6 : 0.4;
+            if (Math.random() < passChance) {
+              action = { type: 'pass' };
+            }
+          }
+        }
+
         if (action.type === 'pass') {
           const result = GameEngine.passTurn(room, playerId);
           wrappedOnAction('pass', result);
@@ -253,6 +267,11 @@ export class AIEngine {
       return { type: 'pass' };
     }
 
+    // Q-Bomber awareness: don't declare a number that's fully visible in faceUpPool
+    if (this.isNumberExposedInFaceUp(room, player, declaredNum)) {
+      return { type: 'pass' };
+    }
+
     const fieldCardsCount = room.field.currentCards.length;
     // 場に出ている枚数があれば、その枚数に合わせる必要がある
     const targetCount = fieldCardsCount > 0 ? fieldCardsCount : computedTargetCount;
@@ -268,6 +287,18 @@ export class AIEngine {
         }
     }
     return { type: 'pass' };
+  }
+
+  /**
+   * Check if a declared number would be an obvious lie because too many of that number
+   * are already visible in the face-up pool + the player's own hand.
+   */
+  private static isNumberExposedInFaceUp(room: Room, player: Player, declaredNum: number): boolean {
+    const maxCards = declaredNum === 0 ? 2 : 4; // Joker: 2, others: 4
+    const faceUpCount = room.field.faceUpPool.filter(c => (c.isJoker ? 0 : c.number) === declaredNum).length;
+    const myCount = player.hand.filter(c => (c.isJoker ? 0 : c.number) === declaredNum).length;
+    // If all copies are accounted for between faceUp and our hand, declaring more would be obvious
+    return (faceUpCount + myCount >= maxCards) && myCount === 0;
   }
 
   private static getStateVector(room: Room, player: Player): number[] {
@@ -463,9 +494,18 @@ export class AIEngine {
       if (!handByNumber.has(num)) handByNumber.set(num, []);
       handByNumber.get(num)!.push(c);
     });
+
+    // Filter out numbers that are fully exposed in faceUpPool (Q-Bomber destroyed)
+    const safeNumbers = (nums: number[]) => nums.filter(n => !this.isNumberExposedInFaceUp(room, player, n));
+
     if (isFieldEmpty) {
       let availableNumbers = Array.from(handByNumber.keys()).filter(n => n !== 0);
-      if (availableNumbers.length === 0) availableNumbers = [0];
+      availableNumbers = safeNumbers(availableNumbers);
+      if (availableNumbers.length === 0) {
+        // Fall back to all non-joker numbers, then joker
+        availableNumbers = Array.from(handByNumber.keys()).filter(n => n !== 0);
+        if (availableNumbers.length === 0) availableNumbers = [0];
+      }
       const isReversed = room.rules.isRevolution !== room.rules.isElevenBack;
       availableNumbers.sort((a, b) => {
         let rankA = (a === 2) ? 15 : (a === 1 ? 14 : a);
@@ -483,6 +523,8 @@ export class AIEngine {
       const targetCount = fieldCardsCount;
       const currentDeclared = room.field.declaredNumber;
       for (const [num, cards] of Array.from(handByNumber.entries())) {
+        if (num === 0) continue; // Skip Jokers in normal iteration
+        if (this.isNumberExposedInFaceUp(room, player, num)) continue;
         if (cards.length >= targetCount) {
           const selectedCards = cards.slice(0, targetCount);
           const validation = validatePlayCards(selectedCards, num, { currentCardCount: targetCount, declaredNumber: currentDeclared, lastPlayerId: room.field.lastPlayerId }, room.rules);
