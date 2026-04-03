@@ -116,6 +116,7 @@ export class GameEngine {
 
     // Remove cards from hand
     player.hand = player.hand.filter(c => !cardIds.includes(c.id));
+    GameEngine.sanitizeHand(player); // Guard against duplication
 
     room.field.currentCards = cards;
     room.field.declaredNumber = declaredNumber;
@@ -412,8 +413,9 @@ export class GameEngine {
       // Note: We do NOT set liar.isSkipped = true.
       // Setting isSkipped would penalize them by skipping their *next* turn as well.
 
-      // Set turn to winner (Doubter)
-      room.currentPlayerIndex = room.turnOrder.indexOf(result.doubterId);
+      // Set turn to the liar's index so that advanceTurn (called after effect)
+      // will move to the next player after the liar.
+      room.currentPlayerIndex = room.turnOrder.indexOf(result.liarId);
 
       room.phase = 'effectPhase';
     } else if (result.type === 'failure') {
@@ -854,6 +856,7 @@ export class GameEngine {
           if (cardIdx === -1) return { success: false, error: '自分の手札にないカードです' };
           const [card] = player.hand.splice(cardIdx, 1);
           targetPlayer.hand.push(card);
+          GameEngine.sanitizeHand(targetPlayer); // Guard against duplication
         }
         GameEngine.addLog(room, 'doubtCardSelect', playerId, { 
           cardCount: cardIds.length, 
