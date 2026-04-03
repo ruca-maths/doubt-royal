@@ -571,7 +571,10 @@ export class GameEngine {
     }
 
     // After all doubt resolution, resolve any pending finish
-    GameEngine.resolvePendingFinish(room);
+    // Phase 15: If an effect is pending, do not resolve finish yet. Wait for handleEffectAction.
+    if (room.phase !== 'effectPhase' && room.phase !== 'doubtPhase') {
+      GameEngine.resolvePendingFinish(room);
+    }
 
     // Safety check: If the turn remains on a player who is already out (e.g., 8-cut win),
     // force the turn to advance to the next active player.

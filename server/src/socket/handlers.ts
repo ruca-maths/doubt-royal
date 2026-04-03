@@ -291,7 +291,8 @@ export function registerHandlers(io: Server): void {
       if (!room) { callback?.({ success: false, error: 'ルームが見つかりません' }); return; }
 
       const player = room.players.find(p => p.id === socket.id);
-      if (!player || player.isOut) { callback?.({ success: false, error: 'アクションできません' }); return; }
+      const isEffectActor = room.pendingEffect && room.pendingEffect.playerId === socket.id;
+      if (!player || (player.isOut && !isEffectActor)) { callback?.({ success: false, error: 'アクションできません' }); return; }
 
       const result = GameEngine.handleEffectAction(room, socket.id, data.cardIds, data.targetData);
       if (!result.success) {
