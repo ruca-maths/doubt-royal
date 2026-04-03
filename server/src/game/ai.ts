@@ -320,7 +320,7 @@ export class AIEngine {
       const stateVector = this.getStateVector(room, ai);
       setTimeout(async () => {
         try {
-          if (room.phase !== 'doubtPhase') {
+          if (room.phase !== 'doubtPhase' || ai.isOut) {
             this.thinkingPlayers.delete(ai.id);
             return;
           }
@@ -395,7 +395,7 @@ export class AIEngine {
     const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
     setTimeout(async () => {
       try {
-        if (room.phase !== 'counterPhase' || room.counterActorIndex === null || room.turnOrder[room.counterActorIndex] !== actorId) {
+        if (room.phase !== 'counterPhase' || room.counterActorIndex === null || room.turnOrder[room.counterActorIndex] !== actorId || player.isOut) {
           this.thinkingPlayers.delete(actorId);
           return;
         }

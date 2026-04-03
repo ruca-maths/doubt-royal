@@ -170,6 +170,9 @@ export function registerHandlers(io: Server): void {
       const room = RoomManager.getRoomByPlayerId(socket.id);
       if (!room) { callback?.({ success: false, error: 'ルームが見つかりません' }); return; }
 
+      const player = room.players.find(p => p.id === socket.id);
+      if (!player || player.isOut) { callback?.({ success: false, error: 'ゲームに参加できません' }); return; }
+
       const result = GameEngine.playCards(room, socket.id, data.cardIds, data.declaredNumber);
       if (!result.success) {
         callback?.({ success: false, error: result.error });
@@ -198,6 +201,9 @@ export function registerHandlers(io: Server): void {
       const room = RoomManager.getRoomByPlayerId(socket.id);
       if (!room) { callback?.({ success: false, error: 'ルームが見つかりません' }); return; }
       if (room.phase !== 'doubtPhase') { callback?.({ success: false, error: 'ダウトフェーズではありません' }); return; }
+      
+      const player = room.players.find(p => p.id === socket.id);
+      if (!player || player.isOut) { callback?.({ success: false, error: 'アクションできません' }); return; }
 
       const success = DoubtManager.registerDoubt(room, socket.id);
       callback?.({ success });
@@ -211,6 +217,9 @@ export function registerHandlers(io: Server): void {
       const room = RoomManager.getRoomByPlayerId(socket.id);
       if (!room) { callback?.({ success: false, error: 'ルームが見つかりません' }); return; }
       if (room.phase !== 'doubtPhase' && room.phase !== 'counterPhase') { callback?.({ success: false, error: 'スキップ可能なフェーズではありません' }); return; }
+      
+      const player = room.players.find(p => p.id === socket.id);
+      if (!player || player.isOut) { callback?.({ success: false, error: 'アクションできません' }); return; }
 
       if (room.phase === 'counterPhase') {
         const counterActorId = room.counterActorIndex !== null ? room.turnOrder[room.counterActorIndex] : null;
@@ -239,6 +248,9 @@ export function registerHandlers(io: Server): void {
       if (!room) { callback?.({ success: false, error: 'ルームが見つかりません' }); return; }
       if (room.phase !== 'doubtPhase' && room.phase !== 'counterPhase') { callback?.({ success: false, error: '現在はカウンターできません' }); return; }
       
+      const player = room.players.find(p => p.id === socket.id);
+      if (!player || player.isOut) { callback?.({ success: false, error: 'カウンターできません' }); return; }
+      
       if (room.phase === 'counterPhase') {
         const counterActorId = room.counterActorIndex !== null ? room.turnOrder[room.counterActorIndex] : null;
         if (socket.id !== counterActorId) { callback?.({ success: false, error: 'あなたの順番ではありません' }); return; }
@@ -261,6 +273,9 @@ export function registerHandlers(io: Server): void {
       const room = RoomManager.getRoomByPlayerId(socket.id);
       if (!room) { callback?.({ success: false, error: 'ルームが見つかりません' }); return; }
 
+      const player = room.players.find(p => p.id === socket.id);
+      if (!player || player.isOut) { callback?.({ success: false, error: 'パスできません' }); return; }
+
       const result = GameEngine.passTurn(room, socket.id);
       if (!result.success) {
         callback?.({ success: false, error: result.error });
@@ -274,6 +289,9 @@ export function registerHandlers(io: Server): void {
     socket.on('effect-action', (data: { cardIds: string[]; targetData?: { numbers?: number[] } }, callback) => {
       const room = RoomManager.getRoomByPlayerId(socket.id);
       if (!room) { callback?.({ success: false, error: 'ルームが見つかりません' }); return; }
+
+      const player = room.players.find(p => p.id === socket.id);
+      if (!player || player.isOut) { callback?.({ success: false, error: 'アクションできません' }); return; }
 
       const result = GameEngine.handleEffectAction(room, socket.id, data.cardIds, data.targetData);
       if (!result.success) {
