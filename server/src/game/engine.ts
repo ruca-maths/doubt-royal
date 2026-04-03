@@ -326,8 +326,9 @@ export class GameEngine {
       } else {
         room.phase = 'playing';
       }
-      return;
     } else if (result.type === 'success') {
+      console.log(`[Doubt SUCCESS] Doubter: ${result.doubterId}, Liar: ${result.liarId}, Cards: ${result.revealedCards.length}`);
+      
       // Move the liar's revealed cards to the face-up pool immediately (Phase 14 fix)
       // Since being revealed by doubt, they should be visible in the face-up graveyard.
       result.revealedCards.forEach(c => { c.isFaceUp = true; });
@@ -419,6 +420,7 @@ export class GameEngine {
 
       room.phase = 'effectPhase';
     } else if (result.type === 'failure') {
+      console.log(`[Doubt FAILURE] Doubter: ${result.doubterId}, Honest: ${result.honestPlayerId}`);
       GameEngine.addLog(room, 'doubtFailure', result.doubterId, { revealedCards: result.revealedCards });
       // Doubt failed (player was honest)
       
@@ -858,6 +860,16 @@ export class GameEngine {
           targetPlayer.hand.push(card);
           GameEngine.sanitizeHand(targetPlayer); // Guard against duplication
         }
+
+        // Phase 14: If the target player was "Out" (won on their last card but was lying),
+        // receiving cards should restore them to the game.
+        if (targetPlayer.isOut) {
+          console.log(`[Restoring Liar] Player ${targetPlayer.id} receives cards and returns to game.`);
+          targetPlayer.isOut = false;
+          targetPlayer.rank = undefined;
+          room.finishOrder = room.finishOrder.filter(id => id !== targetPlayer.id);
+        }
+
         GameEngine.addLog(room, 'doubtCardSelect', playerId, { 
           cardCount: cardIds.length, 
           targetPlayerName: targetPlayer.name 
