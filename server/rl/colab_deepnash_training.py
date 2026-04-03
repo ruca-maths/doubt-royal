@@ -1,6 +1,6 @@
 """
 Google Colab で実行するための Doubt Royale 強化学習スクリプト
-【Phase 4: 全特殊効果(Q/7/10等) ＋ カウンター(4/スペ3) 実装版】
+【Phase 5: Qボンバー認識 ＋ 戦略的パス学習版】
 """
 
 import os
@@ -36,6 +36,64 @@ except Exception:
     SAVE_DIR = '.'
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+class BluffPassTracker:
+    """ブラフ時のパス確率を蓄積データから学習するトラッカー"""
+    def __init__(self):
+        # number -> {attempts, caught, passed, pass_then_ok}
+        self.stats = {}
+        for n in range(14):  # 0=Joker, 1-13
+            self.stats[n] = {'attempts': 0, 'caught': 0, 'passed': 0, 'pass_then_ok': 0}
+        self.global_bluff_attempts = 0
+        self.global_bluff_caught = 0
+
+    def record_bluff_attempt(self, number):
+        self.stats[number]['attempts'] += 1
+        self.global_bluff_attempts += 1
+
+    def record_bluff_caught(self, number):
+        self.stats[number]['caught'] += 1
+        self.global_bluff_caught += 1
+
+    def record_pass(self, number):
+        self.stats[number]['passed'] += 1
+
+    def record_pass_ok(self, number):
+        """パスした結果、次のターンで相手がパスして場が流れた場合"""
+        self.stats[number]['pass_then_ok'] += 1
+
+    def get_pass_probability(self, number):
+        """蓄積データからブラフ時の最適パス確率を算出"""
+        s = self.stats[number]
+        if s['attempts'] < 10:
+            # データ不足時はデフォルト（Jokerは高め、他は中程度）
+            return 0.6 if number == 0 else 0.3
+        
+        # ブラフ発覚率
+        catch_rate = s['caught'] / max(s['attempts'], 1)
+        
+        # 発覚率が高いほどパスすべき
+        # catch_rate: 0.0 -> pass_prob ~0.1 (almost never pass)
+        # catch_rate: 0.5 -> pass_prob ~0.5
+        # catch_rate: 1.0 -> pass_prob ~0.9
+        base_pass = 0.1 + catch_rate * 0.8
+        
+        # Jokerは固有のボーナス（ダウトされやすい）
+        if number == 0:
+            base_pass = min(base_pass + 0.15, 0.95)
+        
+        return min(max(base_pass, 0.05), 0.95)
+
+    def get_summary(self):
+        total_a = self.global_bluff_attempts
+        total_c = self.global_bluff_caught
+        rate = total_c / max(total_a, 1)
+        return f"BluffAttempts={total_a}, Caught={total_c}, Rate={rate:.2%}"
+
+
+# グローバルトラッカー
+bluff_pass_tracker = BluffPassTracker()
 
 class DynamicRewardSystem:
     def __init__(self):
@@ -93,6 +151,7 @@ class DoubtRoyaleEnv(gym.Env):
         self.reward_sys = reward_sys
         self.opponent_policies = None
         self.device = DEVICE
+        self.bluff_tracker = bluff_pass_tracker
         
         # Action Space Dimension: 176
         # 0: Pass/Decline
@@ -175,16 +234,29 @@ class DoubtRoyaleEnv(gym.Env):
             elif 1 <= action <= 52: 
                 num = ((action - 1) % 13) + 1
                 cnt = ((action - 1) // 13) + 1
-                valid = self._handle_play(0, num, cnt, False)
-                if valid: 
-                    self._add_reward('honest_play')
-                    if cnt > 1: self.reward_buffer += self.reward_sys.get_reward('multi_play_bonus') * cnt
+                # Qボンバー破壊カードの回避
+                if self._is_number_exposed(0, num):
+                    self._add_reward('invalid_action')
+                    valid = False
+                else:
+                    valid = self._handle_play(0, num, cnt, False)
+                    if valid: 
+                        self._add_reward('honest_play')
+                        if cnt > 1: self.reward_buffer += self.reward_sys.get_reward('multi_play_bonus') * cnt
             elif 53 <= action <= 104: 
                 num = ((action - 53) % 13) + 1
                 cnt = ((action - 53) // 13) + 1
-                valid = self._handle_play(0, num, cnt, True)
-                if valid and cnt > 1:
-                    self.reward_buffer += self.reward_sys.get_reward('multi_play_bonus') * cnt
+                # Qボンバー破壊カードでのブラフは即却下
+                if self._is_number_exposed(0, num):
+                    self._add_reward('invalid_action')
+                    self.reward_buffer += -0.5  # 追加ペナルティ
+                    valid = False
+                else:
+                    valid = self._handle_play(0, num, cnt, True)
+                    if valid:
+                        self.bluff_tracker.record_bluff_attempt(num)
+                        if cnt > 1:
+                            self.reward_buffer += self.reward_sys.get_reward('multi_play_bonus') * cnt
         elif self.phase == 'doubting':
             if action == 0: self._resolve_doubt(0, False); valid = True
             elif action == 105: 
@@ -296,6 +368,7 @@ class DoubtRoyaleEnv(gym.Env):
         n_cards = len(cards)
         # ジョーカー（is_joker=True）は、どの数字の宣言に対しても「正直」とみなすように修正
         is_lie = any(not c["is_joker"] and c["number"] != self.field["number"] for c in cards)
+        declared_num = self.field["number"]
         
         if is_lie:
             self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
@@ -303,6 +376,9 @@ class DoubtRoyaleEnv(gym.Env):
             self.face_up_pool.extend(cards)
             if liar == 0: self._add_reward('bluff_caught') # Player 0がバレた
             elif p_idx == 0: pass # step側で成功報酬処理済み
+            
+            # ブラフ発覚を記録
+            self.bluff_tracker.record_bluff_caught(declared_num)
             
             self.player_lives[liar] -= 1
             if self.player_lives[liar] <= 0: self.player_out[liar] = True
@@ -397,6 +473,13 @@ class DoubtRoyaleEnv(gym.Env):
         self.active_player = self.turn_player; self.phase = 'playing'
         return True
 
+    def _is_number_exposed(self, p_idx, num):
+        """Qボンバーで破壊されたカードが表墓地に全枚数見えているかチェック"""
+        max_cards = 2 if num == 0 else 4
+        face_up_count = sum(1 for c in self.face_up_pool if (0 if c["is_joker"] else c["number"]) == num)
+        my_count = sum(1 for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) == num)
+        return (face_up_count + my_count >= max_cards) and my_count == 0
+
     def _force_play(self, p_idx):
         if not self.hands[p_idx]: return
         rev = self.is_revolution != self.is_eleven_back
@@ -405,6 +488,15 @@ class DoubtRoyaleEnv(gym.Env):
              v = c["number"] - 3 + 13 if c["number"] < 3 else c["number"] - 3
              return 12 - v if rev else v
         cards = sorted(self.hands[p_idx], key=str_fn)
+        # Qボンバー破壊カードを避ける
+        for weakest in cards:
+            n = 0 if weakest["is_joker"] else weakest["number"]
+            if self._is_number_exposed(p_idx, n):
+                continue
+            matching = [c for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) == n]
+            self._handle_play(p_idx, n, len(matching), False)
+            return
+        # 全て露出している場合は仕方なく最弱を出す
         weakest = cards[0]
         n = 0 if weakest["is_joker"] else weakest["number"]
         matching = [c for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) == n]
@@ -431,8 +523,24 @@ class DoubtRoyaleEnv(gym.Env):
            n = 0 if c["is_joker"] else c["number"]
            groups[n].append(c)
            
+        # 正直に出せるカードを探す（Qボンバー破壊カードを除外）
         for n, cards in groups.items():
+            if n == 0: continue  # Jokerは後回し
+            if self._is_number_exposed(p_idx, n): continue  # 破壊済みカードを回避
             if len(cards) >= req_cnt and str_fn(n) > field_str and not (req_n == 0 and n == 0):
+                self._handle_play(p_idx, n, req_cnt, False)
+                return
+        
+        # 正直に出せない場合、蓄積データからパス確率を算出
+        pass_prob = self.bluff_tracker.get_pass_probability(req_n)
+        if random.random() < pass_prob:
+            self._handle_pass(p_idx)
+            return
+        
+        # ブラフで出す（Qボンバー破壊カードを除外）
+        for n, cards in groups.items():
+            if self._is_number_exposed(p_idx, n): continue
+            if len(cards) >= req_cnt and str_fn(n) > field_str:
                 self._handle_play(p_idx, n, req_cnt, False)
                 return
         
@@ -467,15 +575,29 @@ class DoubtRoyaleEnv(gym.Env):
                 elif 1 <= a <= 52: 
                     num = ((a - 1) % 13) + 1
                     cnt = ((a - 1) // 13) + 1
-                    if not self._handle_play(p, num, cnt, False): 
+                    # Qボンバー破壊カードの回避
+                    if self._is_number_exposed(p, num):
+                        if self.field["count"] == 0: self._force_play(p)
+                        else: self._handle_pass(p)
+                    elif not self._handle_play(p, num, cnt, False): 
                         if self.field["count"] == 0: self._force_play(p)
                         else: self._handle_pass(p)
                 elif 53 <= a <= 104: 
                     num = ((a - 53) % 13) + 1
                     cnt = ((a - 53) // 13) + 1
-                    if not self._handle_play(p, num, cnt, True): 
+                    # Qボンバー破壊カードでのブラフ回避 + 戦略的パス
+                    if self._is_number_exposed(p, num):
                         if self.field["count"] == 0: self._force_play(p)
                         else: self._handle_pass(p)
+                    else:
+                        pass_prob = self.bluff_tracker.get_pass_probability(num)
+                        if self.field["count"] > 0 and random.random() < pass_prob:
+                            self._handle_pass(p)
+                        elif not self._handle_play(p, num, cnt, True): 
+                            if self.field["count"] == 0: self._force_play(p)
+                            else: self._handle_pass(p)
+                        else:
+                            self.bluff_tracker.record_bluff_attempt(num)
                 else: 
                      if self.field["count"] == 0: self._force_play(p)
                      else: self._handle_pass(p)
@@ -588,7 +710,8 @@ def train():
 
         if ep % 100 == 0:
             wr = sum(reward_sys.recent_wins) / len(reward_sys.recent_wins) if reward_sys.recent_wins else 0
-            print(f"EP {ep} | WinRate: {wr:.2%} | LastR: {ep_reward:.2f} | Time: {int(time.time()-start_time)}s")
+            bluff_info = bluff_pass_tracker.get_summary()
+            print(f"EP {ep} | WinRate: {wr:.2%} | LastR: {ep_reward:.2f} | {bluff_info} | Time: {int(time.time()-start_time)}s")
             # 100エピソードごとに自動保存 (切断対策)
             torch.save({
                 'episode': ep,
