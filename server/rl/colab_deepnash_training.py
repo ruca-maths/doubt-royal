@@ -29,10 +29,14 @@ except (ImportError, AttributeError):
 
 try:
     from google.colab import drive
-    drive.mount('/content/drive')
+    print("⏳ Google Drive をマウント中...")
+    drive.mount('/content/drive', force_remount=True)
     SAVE_DIR = '/content/drive/MyDrive/doubt_royale_ai_v15'
-    os.makedirs(SAVE_DIR, exist_ok=True)
-except Exception:
+    if not os.path.exists(SAVE_DIR):
+        os.makedirs(SAVE_DIR, exist_ok=True)
+        print(f"✅ ディレクトリを作成しました: {SAVE_DIR}")
+except Exception as e:
+    print(f"⚠️ Google Drive のマウントに失敗しました。ローカルに保存します: {e}")
     SAVE_DIR = '.'
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -731,14 +735,29 @@ def train():
             wr = sum(reward_sys.recent_wins) / len(reward_sys.recent_wins) if reward_sys.recent_wins else 0
             bluff_info = bluff_pass_tracker.get_summary()
             print(f"EP {ep} | WinRate: {wr:.2%} | LastR: {ep_reward:.2f} | {bluff_info} | Time: {int(time.time()-start_time)}s")
+            
+            # ディレクトリの存在を最終確認 (Colab 接続切れ対策)
+            if not os.path.exists(SAVE_DIR):
+                try: os.makedirs(SAVE_DIR, exist_ok=True)
+                except: pass
+            
             # 100エピソードごとに自動保存 (切断対策)
-            torch.save({
-                'episode': ep,
-                'model_state_dict': agent.policy.state_dict(),
-                'optimizer_state_dict': agent.optimizer.state_dict(),
-                'bluff_tracker_state': bluff_pass_tracker.get_state()
-            }, ckpt)
-            print(f"💾 チェックポイントを自動保存しました: {ckpt}")
+            try:
+                torch.save({
+                    'episode': ep,
+                    'model_state_dict': agent.policy.state_dict(),
+                    'optimizer_state_dict': agent.optimizer.state_dict(),
+                    'bluff_tracker_state': bluff_pass_tracker.get_state()
+                }, ckpt)
+                print(f"💾 チェックポイントを自動保存しました: {ckpt}")
+            except Exception as e:
+                # 失敗した場合はカレントディレクトリにフォールバック
+                fallback_ckpt = "./deepnash_policy_latest_fallback.pth"
+                torch.save({
+                    'episode': ep,
+                    'model_state_dict': agent.policy.state_dict()
+                }, fallback_ckpt)
+                print(f"⚠️ 保存エラーのためローカルにフォールバックしました: {e}")
 
         if ep % 1000 == 0:
             # 1000エピソードごとに最新のONNXを出力
