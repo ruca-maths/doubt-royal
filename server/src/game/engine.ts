@@ -916,11 +916,13 @@ export class GameEngine {
     // If counter was a lie and original card was 8-cut, restore the effect
     const restoreEightCut = (effect as any).restoreEightCutAfter;
     if (restoreEightCut) {
-      GameEngine.addLog(room, 'eightCut', room.field.lastPlayerId || '');
+      const leaderId = room.field.lastPlayerId;
+      console.log(`[8-Cut Restore] Effect restored for player: ${leaderId}`);
+      GameEngine.addLog(room, 'eightCut', leaderId || '');
       clearField(room);
-      // Turn goes to the original 8-cut player (lastPlayerId was restored via rollback)
-      if (room.field.lastPlayerId) {
-        room.currentPlayerIndex = room.turnOrder.indexOf(room.field.lastPlayerId);
+      // Turn goes to the original 8-cut player (must use saved leaderId since clearField resets it)
+      if (leaderId) {
+        room.currentPlayerIndex = room.turnOrder.indexOf(leaderId);
       }
       room.phase = 'playing';
       return { success: true };
