@@ -91,6 +91,21 @@ class BluffPassTracker:
         rate = total_c / max(total_a, 1)
         return f"BluffAttempts={total_a}, Caught={total_c}, Rate={rate:.2%}"
 
+    def get_state(self):
+        """統計データをシリアライズ可能な形式で取得"""
+        return {
+            'stats': self.stats,
+            'global_bluff_attempts': self.global_bluff_attempts,
+            'global_bluff_caught': self.global_bluff_caught
+        }
+
+    def set_state(self, state):
+        """外部から統計データを復元"""
+        if state:
+            self.stats = state.get('stats', self.stats)
+            self.global_bluff_attempts = state.get('global_bluff_attempts', 0)
+            self.global_bluff_caught = state.get('global_bluff_caught', 0)
+
 
 # グローバルトラッカー
 bluff_pass_tracker = BluffPassTracker()
@@ -678,6 +693,10 @@ def train():
                 agent.policy.load_state_dict(checkpoint['model_state_dict'])
                 agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
                 start_ep = checkpoint['episode'] + 1
+                # パス確率統計データの復元
+                if 'bluff_tracker_state' in checkpoint:
+                    bluff_pass_tracker.set_state(checkpoint['bluff_tracker_state'])
+                    print(f"📈 パス確率統計データを復元しました")
             else:
                 # 過去バージョン互換
                 agent.policy.load_state_dict(checkpoint)
@@ -716,7 +735,8 @@ def train():
             torch.save({
                 'episode': ep,
                 'model_state_dict': agent.policy.state_dict(),
-                'optimizer_state_dict': agent.optimizer.state_dict()
+                'optimizer_state_dict': agent.optimizer.state_dict(),
+                'bluff_tracker_state': bluff_pass_tracker.get_state()
             }, ckpt)
             print(f"💾 チェックポイントを自動保存しました: {ckpt}")
 
