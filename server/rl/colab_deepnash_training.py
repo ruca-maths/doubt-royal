@@ -51,6 +51,8 @@ class BluffPassTracker:
             self.stats[n] = {'attempts': 0, 'caught': 0, 'passed': 0, 'pass_then_ok': 0}
         self.global_bluff_attempts = 0
         self.global_bluff_caught = 0
+        self.total_doubts = 0
+        self.total_doubts_success = 0
 
     def record_bluff_attempt(self, number):
         self.stats[number]['attempts'] += 1
@@ -59,6 +61,10 @@ class BluffPassTracker:
     def record_bluff_caught(self, number):
         self.stats[number]['caught'] += 1
         self.global_bluff_caught += 1
+
+    def record_doubt(self, success):
+        self.total_doubts += 1
+        if success: self.total_doubts_success += 1
 
     def record_pass(self, number):
         self.stats[number]['passed'] += 1
@@ -93,14 +99,17 @@ class BluffPassTracker:
         total_a = self.global_bluff_attempts
         total_c = self.global_bluff_caught
         rate = total_c / max(total_a, 1)
-        return f"BluffAttempts={total_a}, Caught={total_c}, Rate={rate:.2%}"
+        doubt_rate = self.total_doubts_success / max(self.total_doubts, 1)
+        return f"Bluff={total_a},Caught={total_c},Rate={rate:.2%},Doubts={self.total_doubts},DSuccess={doubt_rate:.1%}"
 
     def get_state(self):
         """統計データをシリアライズ可能な形式で取得"""
         return {
             'stats': self.stats,
             'global_bluff_attempts': self.global_bluff_attempts,
-            'global_bluff_caught': self.global_bluff_caught
+            'global_bluff_caught': self.global_bluff_caught,
+            'total_doubts': self.total_doubts,
+            'total_doubts_success': self.total_doubts_success
         }
 
     def set_state(self, state):
@@ -109,6 +118,8 @@ class BluffPassTracker:
             self.stats = state.get('stats', self.stats)
             self.global_bluff_attempts = state.get('global_bluff_attempts', 0)
             self.global_bluff_caught = state.get('global_bluff_caught', 0)
+            self.total_doubts = state.get('total_doubts', 0)
+            self.total_doubts_success = state.get('total_doubts_success', 0)
 
 
 # グローバルトラッカー
@@ -389,6 +400,9 @@ class DoubtRoyaleEnv(gym.Env):
         is_lie = any(not c["is_joker"] and c["number"] != self.field["number"] for c in cards)
         declared_num = self.field["number"]
         
+        # ダウト実行を記録
+        self.bluff_tracker.record_doubt(is_lie)
+        
         if is_lie:
             self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
             # 見破られた嘘のカードを墓地へ送る（消滅バグの修正）
@@ -557,10 +571,13 @@ class DoubtRoyaleEnv(gym.Env):
             return
         
         # ブラフで出す（Qボンバー破壊カードを除外）
+        # 場より強い数字を宣言しつつ、実際には手札から適当なカードを出す
         for n, cards in groups.items():
             if self._is_number_exposed(p_idx, n): continue
             if len(cards) >= req_cnt and str_fn(n) > field_str:
-                self._handle_play(p_idx, n, req_cnt, False)
+                # lie=True で呼ぶことで、宣言番号と異なるカードが実際に出される
+                self._handle_play(p_idx, n, req_cnt, True)
+                self.bluff_tracker.record_bluff_attempt(n)
                 return
         
         self._handle_pass(p_idx)
@@ -570,7 +587,10 @@ class DoubtRoyaleEnv(gym.Env):
         while self.active_player != 0 and sum(self.player_out) < self.num_players - 1 and steps < 200:
             p = self.active_player
             if self.opponent_policies and len(self.opponent_policies) > p and self.opponent_policies[p] is not None:
-                if random.random() < 0.2:
+                # ダウトフェーズでは最低10%の確率で強制ダウト（探索促進）
+                if self.phase == 'doubting' and random.random() < 0.10:
+                    a = 105
+                elif random.random() < 0.2:
                     a = -1
                 else:
                     with torch.no_grad():
@@ -579,7 +599,7 @@ class DoubtRoyaleEnv(gym.Env):
                         a = Categorical(probs).sample().item()
             else:
                 if self.phase == 'playing': a = -1
-                elif self.phase == 'doubting': a = random.choice([0, 0, 0, 105])
+                elif self.phase == 'doubting': a = random.choice([0, 0, 105])  # 33%の確率でダウト
                 elif self.phase == 'countering': a = 0
                 elif self.phase == 'q_bomb': a = 108
                 else: a = 122
