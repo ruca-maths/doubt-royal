@@ -30,7 +30,7 @@ except (ImportError, AttributeError):
 try:
     from google.colab import drive
     print("⏳ Google Drive をマウント中...")
-    drive.mount('/content/drive', force_remount=True)
+    drive.mount('/content/drive')
     SAVE_DIR = '/content/drive/MyDrive/doubt_royale_ai_v15'
     if not os.path.exists(SAVE_DIR):
         os.makedirs(SAVE_DIR, exist_ok=True)
@@ -216,7 +216,21 @@ class DoubtRoyaleEnv(gym.Env):
         self.is_eleven_back = False
         self.player_lives = [3] * self.num_players
         self.player_out = [False] * self.num_players
+        
+        # 追加: パフォーマンス最適化・ターン制限用
+        self.face_up_cache = {}
+        self.total_turns = 0
+        self.is_timeout = False
+        self._update_face_up_cache()
+        
         return self._get_flat_obs(0), {}
+
+    def _update_face_up_cache(self):
+        """表墓地のカウントをキャッシュ化（1手ごとに1回更新）"""
+        self.face_up_cache = {}
+        for c in self.face_up_pool:
+            n = 0 if c["is_joker"] else c["number"]
+            self.face_up_cache[n] = self.face_up_cache.get(n, 0) + 1
 
     def _get_flat_obs(self, player_idx):
         hand_vec = np.zeros(54, dtype=np.float32)
@@ -251,7 +265,9 @@ class DoubtRoyaleEnv(gym.Env):
         if self.active_player != 0:
             self._simulate_others()
             done, is_win = self._check_done()
-            if done: self._add_reward('win' if is_win else 'lose')
+            if done:
+                if self.is_timeout: self.reward_buffer += -5.0 # タイムアウトペナルティ
+                self._add_reward('win' if is_win else 'lose')
             return self._get_flat_obs(0), self.reward_buffer, done, False, {}
 
         # プレイヤー0のターン
@@ -312,11 +328,18 @@ class DoubtRoyaleEnv(gym.Env):
             
         self._simulate_others()
         done, is_win = self._check_done()
-        if done: self._add_reward('win' if is_win else 'lose')
+        if done:
+            if self.is_timeout: self.reward_buffer += -5.0
+            self._add_reward('win' if is_win else 'lose')
         
         return self._get_flat_obs(0), self.reward_buffer, done, False, {}
 
     def _check_done(self):
+        # タイムアウト判定 (50ターン制限)
+        if self.total_turns >= 50:
+            self.is_timeout = True
+            return True, False
+            
         ai_won = len(self.hands[0]) == 0 and self.player_lives[0] > 0
         ai_dead = self.player_out[0]
         any_opp_won = any(len(self.hands[i]) == 0 and self.player_lives[i] > 0 for i in range(1, self.num_players))
@@ -358,6 +381,10 @@ class DoubtRoyaleEnv(gym.Env):
         self.hands[p_idx] = [c for c in self.hands[p_idx] if c["id"] not in [cp["id"] for cp in cards]]
         self.field.update({"number": num, "count": len(cards), "last_player": p_idx, "cards": cards})
         if len(cards) >= 4: self.is_revolution = not self.is_revolution
+        
+        self.total_turns += 1 # ターン加算
+        self._update_face_up_cache() # キャッシュ更新
+        
         self.phase = 'doubting'; self.ask_idx = 1; self._set_ask_player()
         return True
 
@@ -429,6 +456,7 @@ class DoubtRoyaleEnv(gym.Env):
             
             # Honest cards stay on the field
             self.turn_player = self._next_player(self.turn_player); self.active_player = self.turn_player; self.phase = 'playing'
+            self._update_face_up_cache() # カードが動いたらキャッシュ更新
             return False
 
     def _resolve_counter(self, p_idx, counter_num):
@@ -507,9 +535,10 @@ class DoubtRoyaleEnv(gym.Env):
         return True
 
     def _is_number_exposed(self, p_idx, num):
-        """Qボンバーで破壊されたカードが表墓地に全枚数見えているかチェック"""
+        """Qボンバーで破壊されたカードが表墓地に全枚数見えているかチェック（キャッシュ版）"""
         max_cards = 2 if num == 0 else 4
-        face_up_count = sum(1 for c in self.face_up_pool if (0 if c["is_joker"] else c["number"]) == num)
+        # face_up_poolの代わりにキャッシュを使用
+        face_up_count = self.face_up_cache.get(num, 0)
         my_count = sum(1 for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) == num)
         return (face_up_count + my_count >= max_cards) and my_count == 0
 
@@ -751,7 +780,11 @@ def train():
         reward_sys.record_win(is_first)
         reward_sys.adjust(ep)
 
+        if ep % 10 == 0:
+            print(".", end="", flush=True) # 10エピソードごとにドットを表示
+
         if ep % 100 == 0:
+            print("") # 改行
             wr = sum(reward_sys.recent_wins) / len(reward_sys.recent_wins) if reward_sys.recent_wins else 0
             bluff_info = bluff_pass_tracker.get_summary()
             print(f"EP {ep} | WinRate: {wr:.2%} | LastR: {ep_reward:.2f} | {bluff_info} | Time: {int(time.time()-start_time)}s")
