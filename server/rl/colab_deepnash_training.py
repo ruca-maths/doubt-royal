@@ -268,7 +268,26 @@ class DoubtRoyaleEnv(gym.Env):
         face_up_counts = face_up_counts / 4.0
             
         obs = np.concatenate([hand_vec, field_vec, others, status_vec, face_up_counts])
-        return np.pad(obs, (0, 114 - len(obs)))
+        
+        # インデックス77に手札の「ポテンシャル(強さ)」を注入 (114次元内)
+        potential = self._get_hand_potential(player_idx, self.is_revolution, self.is_eleven_back)
+        obs_full = np.pad(obs, (0, 114 - len(obs)))
+        obs_full[77] = potential
+        return obs_full
+
+    def _get_hand_potential(self, p_idx, is_rev, is_11b):
+        """現在のルール状況下での手札の「強さ合計」を0.0-1.0で算出"""
+        hand = self.hands[p_idx]
+        if not hand: return 1.0
+        rev = is_rev != is_11b
+        def str_fn(c):
+            if c["is_joker"]: return 14
+            num = c["number"]
+            v = num - 3 + 13 if num < 3 else num - 3
+            return 13 - v if rev else v
+        
+        total = sum(str_fn(c) for c in hand)
+        return total / (len(hand) * 14.0)
 
     def _add_reward(self, event):
         self.reward_buffer += self.reward_sys.get_reward(event)
@@ -381,6 +400,9 @@ class DoubtRoyaleEnv(gym.Env):
     def _handle_play(self, p_idx, num, cnt, lie):
         if not self.hands[p_idx]: return False
         
+        # プレイ前のポテンシャル評価
+        pot_before = self._get_hand_potential(p_idx, self.is_revolution, self.is_eleven_back)
+        
         # 既に出ている場合は枚数を合わせる必要がある
         if self.field["count"] > 0 and cnt != self.field["count"]:
             return False
@@ -399,6 +421,20 @@ class DoubtRoyaleEnv(gym.Env):
                 
         self.hands[p_idx] = [c for c in self.hands[p_idx] if c["id"] not in [cp["id"] for cp in cards]]
         self.field.update({"number": num, "count": len(cards), "last_player": p_idx, "cards": cards})
+        
+        new_rev = self.is_revolution
+        if len(cards) >= 4: new_rev = not self.is_revolution
+        
+        # プレイ後のポテンシャル評価
+        pot_after = self._get_hand_potential(p_idx, new_rev, self.is_eleven_back)
+        
+        # 戦略的プレイ報酬 (革命で有利になった、または複数枚出しで手が整った)
+        if p_idx == 0:
+            if pot_after > pot_before:
+                self.reward_buffer += (pot_after - pot_before) * 10.0 # ポテンシャル向上ボーナス
+            elif pot_after < pot_before and len(cards) >= 4:
+                self.reward_buffer -= 2.0 # 不利な革命へのペナルティ
+
         if len(cards) >= 4: self.is_revolution = not self.is_revolution
         
         self.total_turns += 1 # ターン加算
@@ -595,26 +631,53 @@ class DoubtRoyaleEnv(gym.Env):
         return (elsewhere + my_count >= max_cards) and my_count == 0
 
     def _force_play(self, p_idx):
+        """場が空の時、どの枚数(1-4枚)出すのが将来的に有利かシミュレーションして選択"""
         if not self.hands[p_idx]: return
-        rev = self.is_revolution != self.is_eleven_back
+        
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for c in self.hands[p_idx]:
+             n = 0 if c["is_joker"] else c["number"]
+             groups[n].append(c)
+             
+        best_n, best_cnt, max_pot = -1, 1, -1.0
+        
+        # 各数字について、1枚出し〜全枚数出しをシミュレーション
+        for n, cards in groups.items():
+            if self._is_number_exposed(p_idx, n): continue
+            
+            for test_cnt in range(1, len(cards) + 1):
+                # この枚数を出した後の仮想的な革命状態
+                test_rev = self.is_revolution
+                if test_cnt >= 4: test_rev = not self.is_revolution
+                
+                # 仮想的な手札（実際に抜いた状態）
+                temp_hand = [c for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) != n]
+                # テスト対象以外の同数字カードは残る
+                temp_hand += cards[test_cnt:]
+                
+                pot = self._get_hand_potential_indirect(temp_hand, test_rev, self.is_eleven_back)
+                if pot > max_pot:
+                    max_pot = pot; best_n = n; best_cnt = test_cnt
+
+        if best_n == -1:
+             # 全て露出している場合は仕方なく最弱を出す
+             cards = sorted(self.hands[p_idx], key=lambda x: self._get_hand_potential_indirect([x], self.is_revolution, self.is_eleven_back))
+             best_n = 0 if cards[0]["is_joker"] else cards[0]["number"]
+             best_cnt = 1
+
+        self._handle_play(p_idx, best_n, best_cnt, False)
+
+    def _get_hand_potential_indirect(self, hand, is_rev, is_11b):
+        """外部配列を評価するためのヘルパー"""
+        if not hand: return 1.0
+        rev = is_rev != is_11b
         def str_fn(c):
-             if c["is_joker"]: return 100
-             v = c["number"] - 3 + 13 if c["number"] < 3 else c["number"] - 3
-             return 12 - v if rev else v
-        cards = sorted(self.hands[p_idx], key=str_fn)
-        # Qボンバー破壊カードを避ける
-        for weakest in cards:
-            n = 0 if weakest["is_joker"] else weakest["number"]
-            if self._is_number_exposed(p_idx, n):
-                continue
-            matching = [c for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) == n]
-            self._handle_play(p_idx, n, len(matching), False)
-            return
-        # 全て露出している場合は仕方なく最弱を出す
-        weakest = cards[0]
-        n = 0 if weakest["is_joker"] else weakest["number"]
-        matching = [c for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) == n]
-        self._handle_play(p_idx, n, len(matching), False)
+            if c["is_joker"]: return 14
+            num = c["number"]
+            v = num - 3 + 13 if num < 3 else num - 3
+            return 13 - v if rev else v
+        return sum(str_fn(c) for c in hand) / (len(hand) * 14.0)
 
     def _heuristic_play(self, p_idx):
         if self.field["count"] == 0:
