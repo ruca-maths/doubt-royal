@@ -53,6 +53,32 @@ export default function PlayerInfo({ player, isMe }: PlayerInfoProps) {
             </span>
           )}
         </div>
+
+        {/* Win Rate (visible only to spectators) */}
+        {player.winRate !== undefined && !player.isOut && (
+          <div className="mt-1 pt-1 border-t border-white/5">
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[8px] text-gray-500 font-bold">勝率</span>
+              <span className={`text-[9px] font-black ${
+                player.winRate >= 60 ? 'text-green-400' :
+                player.winRate >= 40 ? 'text-yellow-400' :
+                'text-red-400'
+              }`}>
+                {player.winRate}%
+              </span>
+            </div>
+            <div className="w-full h-[3px] bg-white/10 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  player.winRate >= 60 ? 'bg-gradient-to-r from-green-500 to-emerald-400' :
+                  player.winRate >= 40 ? 'bg-gradient-to-r from-yellow-500 to-amber-400' :
+                  'bg-gradient-to-r from-red-500 to-rose-400'
+                }`}
+                style={{ width: `${player.winRate}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

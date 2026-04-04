@@ -254,6 +254,91 @@ export class AIEngine {
     return maxIdx;
   }
 
+  /**
+   * Get the Critic (Value) output from the model for a given state.
+   * Returns the raw value estimate (expected cumulative reward).
+   */
+  private static async getCriticValue(session: ort.InferenceSession, state: number[]): Promise<number> {
+    const input = new ort.Tensor('float32', new Float32Array(state), [1, 114]);
+    const results = await session.run({ input });
+    
+    // The ActorCriticNet outputs: [action_probs, critic_value]
+    // In ONNX, these become output names like 'output' and 'output_1',
+    // or numbered outputs depending on export settings.
+    const outputKeys = Object.keys(results);
+    
+    // Try to find the critic output (second output, scalar value)
+    for (const key of outputKeys) {
+      const data = results[key].data as Float32Array;
+      // Critic output is a single scalar value (shape [1,1])
+      if (data.length === 1) {
+        return data[0];
+      }
+    }
+    
+    // Fallback: if we can't find a scalar output, try the last key
+    if (outputKeys.length >= 2) {
+      const lastKey = outputKeys[outputKeys.length - 1];
+      return (results[lastKey].data as Float32Array)[0];
+    }
+    
+    return 0; // No critic value available
+  }
+
+  /**
+   * Convert raw critic value to a win rate percentage (0-100).
+   * Based on reward range: win=+100, lose=-30
+   */
+  private static criticToWinRate(value: number): number {
+    // Clamp to expected range and normalize to 0-100%
+    const clamped = Math.max(-30, Math.min(100, value));
+    return Math.round(((clamped + 30) / 130) * 100);
+  }
+
+  /**
+   * Update win rates for all active players in the room.
+   * Called asynchronously after state changes; results are cached in room.winRates.
+   */
+  static async updateWinRates(room: Room): Promise<void> {
+    let session: ort.InferenceSession | null = null;
+    try {
+      session = await this.getSession();
+    } catch (e) {}
+
+    if (!session) {
+      // Fallback: heuristic win rate based on hand size and lives
+      const activePlayers = room.players.filter(p => !p.isOut);
+      if (activePlayers.length === 0) return;
+      
+      const rates: Record<string, number> = {};
+      const totalCards = activePlayers.reduce((sum, p) => sum + p.hand.length, 0);
+      
+      for (const p of activePlayers) {
+        // Simple heuristic: fewer cards + more lives = higher win rate
+        const cardScore = totalCards > 0 ? (1 - p.hand.length / totalCards) : 0.5;
+        const lifeScore = p.lives / 3;
+        rates[p.id] = Math.round((cardScore * 0.6 + lifeScore * 0.4) * 100);
+      }
+      room.winRates = rates;
+      return;
+    }
+
+    try {
+      const rates: Record<string, number> = {};
+      const activePlayers = room.players.filter(p => !p.isOut);
+      
+      for (const player of activePlayers) {
+        const stateVector = this.getStateVector(room, player);
+        const criticValue = await this.getCriticValue(session, stateVector);
+        rates[player.id] = this.criticToWinRate(criticValue);
+      }
+      
+      room.winRates = rates;
+    } catch (e) {
+      console.error('[AI] Failed to update win rates:', e);
+    }
+  }
+
   private static mapActionToGame(room: Room, player: Player, modelAction: number): { type: 'play' | 'pass', cards?: Card[], declaredNumber?: number } {
     if (modelAction === 0) return { type: 'pass' };
     

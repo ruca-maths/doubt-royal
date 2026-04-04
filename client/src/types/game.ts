@@ -64,6 +64,7 @@ export interface ClientPlayer {
   isOut: boolean;
   isCurrentTurn: boolean;
   rankStats: Record<number, number>;
+  winRate?: number;
 }
 
 export interface ClientFieldState {

@@ -114,6 +114,7 @@ export interface Room {
   counterActorIndex: number | null;
   passCount: number;
   logs: LogEntry[];
+  winRates?: Record<string, number>;
 }
 
 // ===== Client-visible state (sanitized) =====
@@ -143,6 +144,7 @@ export interface ClientPlayer {
   isCurrentTurn: boolean;
   rankStats: Record<number, number>;
   isAI?: boolean;
+  winRate?: number;
 }
 
 export interface ClientFieldState {

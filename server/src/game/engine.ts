@@ -990,6 +990,7 @@ export class GameEngine {
    */
   static getClientState(room: Room, playerId: string): ClientGameState {
     const player = room.players.find(p => p.id === playerId);
+    const isSpectator = player?.isOut === true;
 
     return {
       roomId: room.id,
@@ -1005,6 +1006,10 @@ export class GameEngine {
         isOut: p.isOut,
         isCurrentTurn: room.turnOrder[room.currentPlayerIndex] === p.id,
         rankStats: p.rankStats,
+        // Only spectators (isOut players) can see win rates
+        ...(isSpectator && room.winRates && room.winRates[p.id] !== undefined
+          ? { winRate: room.winRates[p.id] }
+          : {}),
       })),
       field: {
         currentCardCount: room.field.currentCards.length,

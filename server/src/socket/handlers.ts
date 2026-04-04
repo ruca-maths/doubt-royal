@@ -338,6 +338,20 @@ export function registerHandlers(io: Server): void {
 }
 
 function broadcastGameState(io: Server, room: import('../game/types').Room): void {
+  // Update win rates asynchronously for spectators
+  const hasSpectators = room.players.some(p => p.isOut);
+  if (hasSpectators && room.phase !== 'waiting' && room.phase !== 'result') {
+    AIEngine.updateWinRates(room).then(() => {
+      // Re-broadcast to spectators with updated win rates
+      for (const player of room.players) {
+        if (player.isOut) {
+          const state = GameEngine.getClientState(room, player.id);
+          io.to(player.id).emit('game-state', state);
+        }
+      }
+    }).catch(() => {});
+  }
+
   for (const player of room.players) {
     const state = GameEngine.getClientState(room, player.id);
     io.to(player.id).emit('game-state', state);
