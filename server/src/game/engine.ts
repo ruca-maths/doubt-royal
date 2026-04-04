@@ -232,16 +232,19 @@ export class GameEngine {
 
     const activePlayers = room.players.filter(p => !p.isOut);
     const nextPlayerId = room.turnOrder[room.currentPlayerIndex];
-    
-    // Check if the last player who played cards is already out
     const lastPlayer = room.players.find(p => p.id === room.field.lastPlayerId);
-    const isFieldOwnerOut = lastPlayer?.isOut && !!room.field.lastPlayerId;
-
+    
+    // Conditions for clearing the field
+    // 1. Back to the player who played the last card (everyone else passed or was skipped)
     const isBackToLastPlayer = room.field.lastPlayerId && nextPlayerId === room.field.lastPlayerId;
-    const isEveryonePassed = room.passCount >= activePlayers.length - 1 && room.field.lastPlayerId !== null;
+    // 2. Everyone else passed
+    const isEveryonePassed = room.passCount >= activePlayers.length - 1 && room.field.lastPlayerId !== null && room.field.currentCards.length > 0;
+    // 3. The player who owned the field is now out of the game
+    const isFieldOwnerOut = lastPlayer?.isOut && !!room.field.lastPlayerId && room.field.currentCards.length > 0;
 
     if (isBackToLastPlayer || isEveryonePassed || isFieldOwnerOut) {
-      console.log(`[Field Clear] Reason: ${isBackToLastPlayer ? 'BackToLead' : (isEveryonePassed ? 'EveryonePassed' : 'FieldOwnerOut')}`);
+      const reason = isBackToLastPlayer ? 'BackToLead' : (isEveryonePassed ? 'EveryonePassed' : 'FieldOwnerOut');
+      console.log(`[Field Clear] Clearing field. Reason: ${reason}, LastPlayer: ${room.field.lastPlayerId}, PassCount: ${room.passCount}`);
       clearField(room);
       room.passCount = 0;
     }

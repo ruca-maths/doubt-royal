@@ -109,7 +109,7 @@ export class AIEngine {
     } catch (err) {}
 
     const stateVector = this.getStateVector(room, player);
-    const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
+    const thinkingTime = Math.floor(Math.random() * 2000) + 1500;
     
     setTimeout(async () => {
       try {
@@ -441,7 +441,7 @@ export class AIEngine {
       if (room.doubtSkippers.includes(ai.id) || room.doubtDeclarers.includes(ai.id)) return;
       if (this.thinkingPlayers.has(ai.id)) return;
       this.thinkingPlayers.add(ai.id);
-      const thinkingTime = Math.floor(Math.random() * (room.rules.doubtTime * 1000 * 0.5)) + 1000;
+      const thinkingTime = Math.floor(Math.random() * (room.rules.doubtTime * 1000 * 0.4)) + 1200;
       const stateVector = this.getStateVector(room, ai);
       setTimeout(async () => {
         try {
