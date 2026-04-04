@@ -10,85 +10,49 @@ export default function PlayerInfo({ player, isMe }: PlayerInfoProps) {
   return (
     <div className="flex-none z-10">
       <div
-        className={`glass rounded-xl px-4 py-3 min-w-[140px] transition-all duration-300 ${
+        className={`glass rounded-xl px-2 py-1.5 min-w-[100px] transition-all duration-300 ${
           player.isCurrentTurn
-            ? 'glow-accent border-game-accent/50'
+            ? 'glow-accent border-game-accent/50 bg-game-accent/10'
             : player.isOut
-            ? 'opacity-50'
+            ? 'opacity-50 grayscale'
             : ''
         }`}
       >
-        {/* Name */}
-        <div className="flex items-center gap-2 mb-1">
-          <div
-            className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-              player.isCurrentTurn
-                ? 'bg-game-accent text-white'
-                : 'bg-game-card text-gray-400'
-            }`}
-          >
-            {player.name.charAt(0).toUpperCase()}
-          </div>
-          <div>
-            <p className={`text-sm font-semibold truncate max-w-[80px] ${isMe ? 'text-game-accent-light' : ''}`}>
-              {player.name}
-              {isMe && <span className="text-xs ml-1 opacity-60">(自分)</span>}
-            </p>
-            <p className="text-xs text-gray-500">
-              {player.cardCount}枚
-            </p>
-          </div>
+        {/* Name and Card Count */}
+        <div className="flex items-center justify-between gap-1 border-b border-white/5 pb-1">
+          <p className={`text-[11px] font-bold truncate max-w-[65px] ${isMe ? 'text-game-accent-light' : 'text-white'}`}>
+            {player.name}
+          </p>
+          <p className="text-[10px] text-gray-400 font-bold">
+            {player.cardCount}
+          </p>
         </div>
 
-        {/* Lives */}
-        <div className="flex gap-0.5 mt-1">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <span
-              key={i}
-              className={`text-sm transition-all duration-300 ${
-                i < player.lives ? 'opacity-100' : 'opacity-20 grayscale'
-              }`}
-            >
-              ❤️
+        {/* Lives and Status */}
+        <div className="flex items-center justify-between mt-1">
+          <div className="flex gap-0 px-0.5">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <span
+                key={i}
+                className={`text-[9px] ${
+                  i < player.lives ? 'opacity-100' : 'opacity-20'
+                }`}
+              >
+                ❤️
+              </span>
+            ))}
+          </div>
+          {player.isCurrentTurn && !player.isOut && (
+            <span className="text-[8px] text-game-accent-light font-black animate-pulse">
+              TURN
             </span>
-          ))}
+          )}
+          {player.isOut && (
+            <span className={`text-[8px] font-black ${player.rank && player.rank > 0 ? 'text-game-gold' : 'text-game-danger'}`}>
+              {player.rank && player.rank > 0 ? 'WIN' : 'OUT'}
+            </span>
+          )}
         </div>
-
-        {/* Status */}
-        {player.isOut && player.rank && player.rank > 0 && (
-          <div className="mt-1">
-            <span className="text-xs px-2 py-0.5 rounded-full bg-game-gold/20 text-game-gold font-semibold">
-              {player.rank}位 上がり
-            </span>
-          </div>
-        )}
-        {player.isOut && (!player.rank || player.rank < 0) && (
-          <div className="mt-1">
-            <span className="text-xs px-2 py-0.5 rounded-full bg-game-danger/20 text-game-danger font-semibold">
-              脱落
-            </span>
-          </div>
-        )}
-        {player.isCurrentTurn && !player.isOut && (
-          <div className="mt-1">
-            <span className="text-xs px-2 py-0.5 rounded-full bg-game-accent/20 text-game-accent-light font-semibold animate-pulse">
-              ターン中
-            </span>
-          </div>
-        )}
-
-        {/* Rank Stats */}
-        {player.rankStats && Object.keys(player.rankStats).length > 0 && (
-          <div className="mt-2 pt-1 border-t border-white/5 flex flex-wrap gap-x-2 gap-y-0.5 max-w-[120px]">
-            {Object.entries(player.rankStats)
-              .sort(([a], [b]) => Number(a) - Number(b))
-              .map(([rank, count]) => (
-                <span key={rank} className="text-[9px] text-gray-400 whitespace-nowrap">
-                  {rank}位:{count}
-                </span>
-              ))}
-          </div>
-        )}
       </div>
     </div>
   );

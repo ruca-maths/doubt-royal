@@ -154,125 +154,136 @@ export default function GameBoard() {
           </div>
         </div>
 
-        {/* Center field (MIDDLE) */}
-        <div className="flex-1 flex flex-col items-center justify-center px-4 overflow-hidden relative">
-          <div className="glass rounded-2xl px-6 py-4 min-w-[200px] w-auto max-w-md my-auto">
-            {gameState.field.lastPlayerId ? (
-              <>
-                <p className="text-[10px] text-gray-500 mb-1">
-                  {gameState.players.find(p => p.id === gameState.field.lastPlayerId)?.name} が出した
+        {/* Center field (MIDDLE) - Restructured to 3 columns */}
+        <div className="flex-1 flex w-full overflow-hidden relative items-center px-2">
+          {/* Left Column: Turn/Status */}
+          <div className="flex-1 flex flex-col items-center justify-center text-center px-1">
+            {!isMyTurn && gameState.phase === 'playing' ? (
+              <div className="glass-light rounded-lg px-2 py-1.5 animate-pulse">
+                <p className="text-[10px] text-gray-500 uppercase font-black">Waiting</p>
+                <p className="text-xs font-bold text-white truncate max-w-[80px]">
+                  {gameState.players.find(p => p.id === gameState.currentPlayerId)?.name}
                 </p>
-                <div className="flex justify-center gap-1 mb-2">
-                  {gameState.field.revealedCards && gameState.field.revealedCards.length > 0 ? (
-                    gameState.field.revealedCards.map((c, i) => (
-                      <div key={c.id || i} className="w-8 h-12 rounded-md shadow-lg transform rotate-[-5deg]" style={{ marginLeft: i > 0 ? '-0.75rem' : '0' }}>
-                        <Card card={c} small faceDown={false} />
-                      </div>
-                    ))
-                  ) : (
-                    Array.from({ length: gameState.field.currentCardCount }).map((_, i) => (
-                      <div key={i} className="w-8 h-12 rounded-md card-back shadow-lg transform rotate-[-5deg]" style={{ marginLeft: i > 0 ? '-0.75rem' : '0' }} />
-                    ))
-                  )}
-                </div>
-                <div className="text-3xl font-black text-game-accent-light leading-none" style={{ fontFamily: 'Orbitron, sans-serif' }}>
-                  {getDeclaredNumberDisplay(gameState.field.declaredNumber)}
-                </div>
-                
-                {/* Phase 13: Q-Bomber Target Numbers */}
-                {gameState.field.pendingNumbers && gameState.field.pendingNumbers.length > 0 && (
-                  <div className="mt-1 animate-pulse">
-                    <div className="text-[9px] text-game-danger font-bold uppercase tracking-wider">Targeting</div>
-                    <div className="flex justify-center gap-1">
+              </div>
+            ) : isMyTurn && gameState.phase === 'playing' ? (
+              <div className="bg-game-accent/20 border border-game-accent/30 rounded-lg px-2 py-1.5 animate-bounce-in">
+                <p className="text-[10px] text-game-accent-light uppercase font-black">Your Turn</p>
+              </div>
+            ) : null}
+          </div>
+
+          {/* Center Column: Field Area */}
+          <div className="flex-[2] flex flex-col items-center justify-center">
+            <div className="glass rounded-xl px-4 py-3 min-w-[160px] border border-white/10 relative shadow-2xl">
+              {gameState.field.lastPlayerId ? (
+                <>
+                  <div className="flex justify-center gap-1 mb-1">
+                    {gameState.field.revealedCards && gameState.field.revealedCards.length > 0 ? (
+                      gameState.field.revealedCards.map((c, i) => (
+                        <div key={c.id || i} className="w-8 h-12 rounded-md shadow-lg transform rotate-[-5deg]" style={{ marginLeft: i > 0 ? '-0.75rem' : '0' }}>
+                          <Card card={c} small faceDown={false} />
+                        </div>
+                      ))
+                    ) : (
+                      Array.from({ length: gameState.field.currentCardCount }).map((_, i) => (
+                        <div key={i} className="w-8 h-12 rounded-md card-back shadow-lg transform rotate-[-5deg]" style={{ marginLeft: i > 0 ? '-0.75rem' : '0' }} />
+                      ))
+                    )}
+                  </div>
+                  <div className="text-2xl font-black text-game-accent-light leading-none text-center" style={{ fontFamily: 'Orbitron, sans-serif' }}>
+                    {getDeclaredNumberDisplay(gameState.field.declaredNumber)}
+                  </div>
+                  
+                  {gameState.field.pendingNumbers && gameState.field.pendingNumbers.length > 0 && (
+                    <div className="mt-1 flex justify-center gap-1">
                       {gameState.field.pendingNumbers.map(num => (
-                        <span key={num} className="bg-game-danger/20 text-game-danger px-1 py-0.5 rounded text-xs font-black border border-game-danger/30">
+                        <span key={num} className="bg-game-danger/20 text-game-danger px-1 py-0.5 rounded text-[9px] font-black border border-game-danger/30">
                           {num === 0 ? 'JOKER' : num}
                         </span>
                       ))}
                     </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="text-gray-600 py-2">
-                <p className="text-sm font-bold mb-1">場にカードなし</p>
-              </div>
-            )}
+                  )}
+                </>
+              ) : (
+                <div className="text-gray-600 py-1 text-center font-bold text-xs">
+                  NO CARDS
+                </div>
+              )}
+            </div>
+          </div>
 
-            {/* Grave info */}
-            <div className="mt-2 pt-2 border-t border-white/5 flex justify-around">
-              <div className="text-center">
-                <div className="text-[9px] text-gray-500 uppercase">裏墓地</div>
-                <div className="text-sm font-black text-gray-400">{gameState.field.cardHistoryCount}</div>
-              </div>
-              <div className="text-center cursor-pointer hover:scale-105 transition-transform" onClick={() => setShowFaceUpPool(true)}>
-                <div className="text-[9px] text-game-accent-light uppercase">表墓地</div>
-                <div className="text-sm font-black text-white glow-text-accent">{gameState.field.faceUpPool.length}</div>
-              </div>
+          {/* Right Column: Grave stats */}
+          <div className="flex-1 flex flex-col items-center justify-center gap-2">
+            <div className="text-center">
+              <p className="text-[9px] text-gray-500 uppercase">裏</p>
+              <p className="text-sm font-black text-gray-400 leading-none">{gameState.field.cardHistoryCount}</p>
+            </div>
+            <div className="text-center cursor-pointer bg-white/5 rounded-lg p-1 border border-white/5 hover:bg-white/10" onClick={() => setShowFaceUpPool(true)}>
+              <p className="text-[9px] text-game-accent-light uppercase">表</p>
+              <p className="text-sm font-black text-white glow-text-accent leading-none">{gameState.field.faceUpPool.length}</p>
             </div>
           </div>
         </div>
 
         {/* Action buttons and My hand area (BOTTOM) */}
-        <div className="shrink-0 z-20 flex flex-col w-full">
-          {/* Action buttons */}
-          <div className="flex justify-center flex-wrap gap-2 mb-1 px-2 pt-2 bg-black/20 border-t border-white/5">
-            {isMyTurn && gameState.phase === 'playing' && (
-              <>
+        <div className="shrink-0 z-20 flex flex-col w-full bg-black/40 border-t border-white/10">
+          {/* Action buttons and Life display combined */}
+          <div className="flex items-center justify-between px-3 py-1 bg-black/20 shrink-0">
+            {myPlayer && (
+              <div className="flex items-center gap-1.5 min-w-[60px]">
+                <div className="flex">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <span key={i} className={`text-[10px] ${i < myPlayer.lives ? '' : 'opacity-20'}`}>❤️</span>
+                  ))}
+                </div>
+                <span className="text-[10px] text-gray-500 font-bold">{gameState.myHand.length}</span>
+              </div>
+            )}
+
+            <div className="flex-1 flex justify-center gap-2">
+              {isMyTurn && gameState.phase === 'playing' && (
+                <>
+                  <button
+                    onClick={() => setShowPlayModal(true)}
+                    disabled={selectedCardIds.length === 0}
+                    className={`px-3 py-1 rounded-lg font-bold text-xs transition-all duration-200 ${
+                      selectedCardIds.length > 0
+                        ? 'bg-gradient-to-r from-game-accent to-purple-500 text-white shadow-glow'
+                        : 'bg-game-card/80 text-gray-600 cursor-not-allowed'
+                    }`}
+                  >
+                    出す ({selectedCardIds.length})
+                  </button>
+                  <button
+                    onClick={passTurn}
+                    className="px-3 py-1 rounded-lg font-bold text-xs bg-game-card/80 hover:bg-game-border text-gray-300 transition-all font-mono"
+                  >
+                    PASS
+                  </button>
+                </>
+              )}
+
+              {gameState.phase === 'counterPhase' && gameState.counterActorId === myId && (
                 <button
-                  onClick={() => setShowPlayModal(true)}
+                  onClick={handleDeclareCounter}
                   disabled={selectedCardIds.length === 0}
-                  className={`px-4 py-1.5 rounded-lg font-bold text-sm transition-all duration-200 ${
+                  className={`px-3 py-1 rounded-lg font-bold text-xs transition-all duration-200 ${
                     selectedCardIds.length > 0
                       ? 'bg-gradient-to-r from-game-accent to-purple-500 text-white shadow-glow'
                       : 'bg-game-card/80 text-gray-600 cursor-not-allowed'
                   }`}
                 >
-                  出す ({selectedCardIds.length})
+                  カウンター！ ({selectedCardIds.length})
                 </button>
-                <button
-                  onClick={passTurn}
-                  className="px-4 py-1.5 rounded-lg font-bold text-sm bg-game-card/80 hover:bg-game-border text-gray-300 transition-all"
-                >
-                  パス
-                </button>
-              </>
-            )}
-
-            {!isMyTurn && gameState.phase === 'playing' && (
-              <div className="px-3 py-1 rounded-lg bg-game-card/50 text-gray-500 text-xs">
-                {gameState.players.find(p => p.id === gameState.currentPlayerId)?.name} のターン...
-              </div>
-            )}
-
-            {gameState.phase === 'counterPhase' && gameState.counterActorId === myId && (
-              <button
-                 onClick={handleDeclareCounter}
-                 disabled={selectedCardIds.length === 0}
-                 className={`px-4 py-1.5 rounded-lg font-bold text-sm transition-all duration-200 ${
-                   selectedCardIds.length > 0
-                     ? 'bg-gradient-to-r from-game-accent to-purple-500 text-white shadow-glow'
-                     : 'bg-game-card/80 text-gray-600 cursor-not-allowed'
-                 }`}
-               >
-                 カウンター！ ({selectedCardIds.length})
-               </button>
-            )}
+              )}
+            </div>
+            
+            <div className="min-w-[60px]" /> {/* Spacer for symmetry */}
           </div>
 
-          {/* Hand */}
-          <div className="glass-light px-2 py-1 flex flex-col w-full h-[150px] overflow-hidden">
-            {myPlayer && (
-              <div className="flex items-center gap-2 mb-1 px-2 shrink-0">
-                <div className="flex gap-0.5">
-                  {Array.from({ length: 3 }).map((_, i) => (
-                    <span key={i} className={`text-[10px] ${i < myPlayer.lives ? '' : 'opacity-20'}`}>❤️</span>
-                  ))}
-                </div>
-                <span className="text-[10px] text-gray-500">{gameState.myHand.length}枚</span>
-              </div>
-            )}
-            <div className="w-full flex-1">
+          {/* Hand Container - Reduced height and padding */}
+          <div className="px-2 py-0.5 h-[120px] overflow-hidden flex items-end">
+            <div className="w-full h-full">
               <Hand
                 cards={gameState.myHand}
                 selectedIds={selectedCardIds}

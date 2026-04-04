@@ -97,36 +97,36 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
         className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 cursor-pointer p-4"
         onClick={clearDoubtResult}
       >
-        <div className={`animate-bounce-in rounded-2xl p-8 text-center glass shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto ${
+        <div className={`animate-bounce-in rounded-2xl p-4 text-center glass shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto ${
           isSuccess || isCounter ? 'border-game-accent/50' : 'border-game-danger/50'
         }`}>
-          <div className="text-6xl mb-4">
+          <div className="text-4xl mb-2">
             {isCounter ? '🛡️' : (isSuccess ? '🎯' : '💥')}
           </div>
-          <h2 className="text-3xl font-black mb-2" style={{ fontFamily: 'Orbitron, sans-serif' }}>
+          <h2 className="text-xl font-black mb-1" style={{ fontFamily: 'Orbitron, sans-serif' }}>
             {title}
           </h2>
-          <p className="text-lg text-white mb-4">
+          <p className="text-sm text-white mb-3">
             {description}
           </p>
-          <div className="bg-game-accent/20 border border-game-accent/30 rounded-xl p-4 mb-4">
-            <p className="text-game-accent-light font-bold">
+          <div className="bg-game-accent/20 border border-game-accent/30 rounded-lg p-2 mb-3">
+            <p className="text-game-accent-light text-xs font-bold leading-tight">
               {isCounter 
-                ? `${winnerName} からターンが再開されます！` 
-                : `報酬: ${winnerName} は手札を ${doubtResult.count} 枚渡せます！`}
+                ? `${winnerName} から再開！` 
+                : `${winnerName} は手札を ${doubtResult.count} 枚渡せます！`}
             </p>
           </div>
           
           {/* Revealed cards */}
-          <div className="flex justify-center gap-2 mt-2">
+          <div className="flex justify-center gap-1.5 mt-1">
             {doubtResult.revealedCards?.map((card, i) => (
-              <div key={i} className="bg-white rounded-lg px-3 py-2 text-black font-bold text-sm shadow-md">
-                {card.isJoker ? '🃏 JOKER' : `${card.suit === 'heart' || card.suit === 'diamond' ? '🔴' : '⚫'} ${getDeclaredNumberDisplay(card.number)}`}
+              <div key={i} className="bg-white rounded-md px-2 py-1 text-black font-black text-[10px] shadow-sm">
+                {card.isJoker ? '🃏' : `${card.suit === 'heart' || card.suit === 'diamond' ? '🔴' : '⚫'}${getDeclaredNumberDisplay(card.number)}`}
               </div>
             ))}
           </div>
-          <p className="mt-6 text-xs text-gray-500 animate-pulse">
-            画面クリックで閉じる
+          <p className="mt-4 text-[10px] text-gray-500 animate-pulse">
+            タップで閉じる
           </p>
         </div>
       </div>
@@ -148,102 +148,88 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50 animate-fade-in pointer-events-none">
-      <div className="glass rounded-2xl p-6 max-w-sm w-full text-center pointer-events-auto shadow-2xl border border-white/10 max-h-[100dvh] overflow-y-auto">
+      <div className="glass rounded-xl p-3 max-w-sm w-full text-center pointer-events-auto shadow-2xl border border-white/10 max-h-[100dvh] overflow-y-auto">
         {/* Info */}
-        <p className="text-gray-400 text-sm mb-2">
+        <p className="text-gray-400 text-[10px] mb-1 font-bold uppercase tracking-tight">
           {isCounterPhase 
-            ? '特殊効果カウンター確認中...' 
+            ? 'COUNTER CHECKING' 
             : (isCounterDoubt 
-                ? `${lastPlayerName} のカウンターに対するダウト確認` 
-                : `${lastPlayerName} が ${gameState.field.currentCardCount}枚${isDiscard ? '捨てた' : '出した'}`)}
+                ? `${lastPlayerName} のカウンターへダウト？` 
+                : `${lastPlayerName}: ${gameState.field.currentCardCount}枚 ${isDiscard ? '捨' : '出'}`)}
         </p>
         
-        <div className="text-4xl font-black mb-1 text-game-accent-light" style={{ fontFamily: 'Orbitron, sans-serif' }}>
-          {isCounterPhase ? '待機中' : `宣言: ${getDeclaredNumberDisplay(declaredNum)}`}
+        <div className="text-2xl font-black mb-1 text-game-accent-light leading-none" style={{ fontFamily: 'Orbitron, sans-serif' }}>
+          {isCounterPhase ? 'WAITING' : `宣言: ${getDeclaredNumberDisplay(declaredNum)}`}
         </div>
         {pendingNumbers && (
-          <div className="bg-game-danger/20 border border-game-danger/30 rounded-lg p-2 mb-4">
-            <p className="text-game-danger text-sm font-bold">
-              破壊対象: {pendingNumbers.map(n => getDeclaredNumberDisplay(n)).join(', ')}
+          <div className="bg-game-danger/20 border border-game-danger/30 rounded-md p-1 mb-2">
+            <p className="text-game-danger text-[10px] font-black">
+              TARGET: {pendingNumbers.map(n => getDeclaredNumberDisplay(n)).join(', ')}
             </p>
           </div>
         )}
-        {/* 4-counter effect only appears when it's a counter doubt phase */}
+        {/* Effect status */}
         {getCardEffectName(declaredNum, gameState.rules.isRevolution) && gameState.field.isEffectActive && (declaredNum !== 4 || isCounterDoubt) && (
-          <div className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-yellow-500 animate-pulse-glow mb-4">
+          <div className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-yellow-500 animate-pulse-glow mb-2">
             {getCardEffectName(declaredNum, gameState.rules.isRevolution)}
           </div>
         )}
-        {(!getCardEffectName(declaredNum, gameState.rules.isRevolution) || (declaredNum === 4 && !isCounterDoubt)) && <div className="mb-4" />}
 
         {/* Timer bar */}
         {!isCounterPhase && (
-          <div className="w-full h-2 bg-game-card rounded-full mb-6 overflow-hidden">
+          <div className="w-full h-1.5 bg-game-card rounded-full mb-3 overflow-hidden">
             <div
-              className="doubt-timer-bar"
+              className="doubt-timer-bar h-full"
               style={{ width: `${progress}%` }}
             />
           </div>
         )}
-        {isCounterPhase && <div className="mb-6 h-2" />}
 
         {/* Buttons */}
         {isCounterPhase ? (
           gameState.pendingEffect?.playerId === myId ? (
-            <div className="py-5 text-game-accent-light text-lg font-bold animate-pulse">
-              🛡️ カウンター待機中...
+            <div className="py-2 text-game-accent-light text-sm font-bold animate-pulse">
+              🛡️ 待機中...
             </div>
           ) : gameState.counterActorId === myId && !hasActed ? (
-            <div className="space-y-3">
-              <button
-                onClick={handleSkip}
-                className="w-full py-3 rounded-xl bg-game-card hover:bg-game-border text-gray-400 hover:text-white font-medium transition-all"
-              >
-                スルー（カウンターしない）
-              </button>
-            </div>
+            <button
+              onClick={handleSkip}
+              className="w-full py-2 rounded-lg bg-game-card text-gray-400 text-sm font-bold"
+            >
+              スルー
+            </button>
           ) : isMyCards ? (
-            <div className="py-5 text-gray-500 text-lg">
-              相手のカウンター判定を待っています...
-            </div>
-          ) : gameState.counterActorId === myId && hasActed ? (
-            <div className="py-5 text-game-accent-light text-lg font-semibold animate-pulse">
-              ✅ 宣言済み
-            </div>
+            <div className="py-2 text-gray-500 text-sm">判定待ち...</div>
+          ) : hasActed ? (
+            <div className="py-2 text-game-accent-light text-sm font-bold animate-pulse font-black">WAITING...</div>
           ) : (
-            <div className="py-5 text-gray-400 text-sm">
-              {gameState.players.find(p => p.id === (gameState.pendingEffect?.playerId || gameState.counterActorId))?.name || '他のプレイヤー'} の判断を待機中...
+            <div className="py-2 text-gray-400 text-[10px]">
+              {gameState.players.find(p => p.id === (gameState.pendingEffect?.playerId || gameState.counterActorId))?.name || '他者'} の判断待ち
             </div>
           )
         ) : (
           /* Normal doubt logic */
           gameState.pendingEffect?.playerId === myId ? null : (
             !isMyCards && !hasActed ? (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <button
                   onClick={handleDoubt}
-                  className="w-full py-5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-500 text-white text-2xl font-black
-                             hover:from-red-500 hover:to-rose-400 active:scale-95 transition-all duration-200
-                             animate-pulse-glow shadow-2xl"
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-500 text-white text-xl font-black shadow-lg shadow-red-900/20 active:scale-95 transition-all"
                   style={{ fontFamily: 'Orbitron, sans-serif' }}
                 >
-                  ダウト！
+                  DOUBT!
                 </button>
                 <button
                   onClick={handleSkip}
-                  className="w-full py-3 rounded-xl bg-game-card hover:bg-game-border text-gray-400 hover:text-white font-medium transition-all"
+                  className="w-full py-2 rounded-lg bg-white/5 text-gray-400 text-xs font-bold"
                 >
-                  スルー（ダウトしない）
+                  SKIP
                 </button>
               </div>
             ) : isMyCards ? (
-              <div className="py-5 text-gray-500 text-lg">
-                相手のダウト判定を待っています...
-              </div>
+              <div className="py-2 text-gray-500 text-sm">判定待ち...</div>
             ) : (
-              <div className="py-5 text-game-accent-light text-lg font-semibold animate-pulse">
-                ✅ 宣言済み
-              </div>
+              <div className="py-2 text-game-accent-light text-sm font-black animate-pulse">DONE</div>
             )
           )
         )}
