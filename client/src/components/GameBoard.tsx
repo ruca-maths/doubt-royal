@@ -213,14 +213,14 @@ export default function GameBoard() {
           </div>
 
           {/* Right Column: Grave stats */}
-          <div className="flex-1 flex flex-col items-center justify-center gap-3">
-            <div className="text-center bg-black/20 rounded-lg p-2 border border-white/5 w-12">
-              <p className="text-[10px] text-gray-500 font-bold mb-0.5">裏</p>
-              <p className="text-xl font-black text-gray-400 leading-none">{gameState.field.cardHistoryCount}</p>
+          <div className="flex-1 flex flex-row items-center justify-center gap-1.5 px-1">
+            <div className="text-center bg-black/20 rounded-md p-1 border border-white/5 min-w-[38px]">
+              <p className="text-[9px] text-gray-500 font-bold leading-tight">裏</p>
+              <p className="text-base font-black text-gray-300 leading-none">{gameState.field.cardHistoryCount}</p>
             </div>
-            <div className="text-center cursor-pointer bg-game-accent/10 rounded-lg p-2 border border-game-accent/20 w-12 hover:bg-game-accent/20 transition-all" onClick={() => setShowFaceUpPool(true)}>
-              <p className="text-[10px] text-game-accent-light font-bold mb-0.5">表</p>
-              <p className="text-xl font-black text-white glow-text-accent leading-none">{gameState.field.faceUpPool.length}</p>
+            <div className="text-center cursor-pointer bg-game-accent/10 rounded-md p-1 border border-game-accent/20 min-w-[38px] hover:bg-game-accent/20 transition-all font-black" onClick={() => setShowFaceUpPool(true)}>
+              <p className="text-[9px] text-game-accent-light flex items-center justify-center font-bold leading-tight">表</p>
+              <p className="text-base font-black text-white glow-text-accent leading-none">{gameState.field.faceUpPool.length}</p>
             </div>
           </div>
         </div>
@@ -281,9 +281,9 @@ export default function GameBoard() {
             <div className="min-w-[60px]" /> {/* Spacer for symmetry */}
           </div>
 
-          {/* Hand Container - Stick to bottom */}
-          <div className="px-1 py-0 h-[120px] overflow-hidden flex items-end">
-            <div className="w-full h-full transform translate-y-[5px]">
+          {/* Hand Container - Truly at the bottom */}
+          <div className="px-0 py-0 h-auto overflow-hidden flex items-end">
+            <div className="w-full h-full flex items-end">
               <Hand
                 cards={gameState.myHand}
                 selectedIds={selectedCardIds}
