@@ -453,6 +453,15 @@ export class GameEngine {
         targetPlayerId: result.doubterId,
       };
 
+      // Ensure that if an honest 8-cut or Joker was doubted, the effect resumes after penalty selection.
+      const is8Cut = room.field.declaredNumber === 8;
+      const isSingleJoker = room.field.declaredNumber === 0 && room.field.currentCards.length === 1;
+      if (is8Cut) {
+        (room.pendingEffect as any).restoreEightCutAfter = true;
+      } else if (isSingleJoker) {
+        (room.pendingEffect as any).startCounterPhaseAfter = true;
+      }
+
         // Phase 6: Q-Bomber honest -> Execute bomb destruction NOW, before card select
       if (room.field.declaredNumber === 12 && room.field.pendingNumbers) {
         const numbers = room.field.pendingNumbers;
