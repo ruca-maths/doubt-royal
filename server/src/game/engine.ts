@@ -466,8 +466,7 @@ export class GameEngine {
       if (room.field.declaredNumber === 12 && room.field.pendingNumbers) {
         const numbers = room.field.pendingNumbers;
         for (const p of room.players) {
-          // Rule 13: Q-Bomber only targets OTHER players
-          if (p.isOut || p.id === result.honestPlayerId) continue;
+          if (p.isOut) continue;
           const toDiscard = p.hand.filter(c =>
             numbers.includes(c.number) || (numbers.includes(0) && c.isJoker)
           );
@@ -548,8 +547,7 @@ export class GameEngine {
           // Q-bomber survive doubt -> apply bomb
           const numbers = room.field.pendingNumbers;
           for (const p of room.players) {
-            // Rule 13: Q-Bomber only targets OTHER players
-            if (p.isOut || p.id === room.field.lastPlayerId) continue;
+            if (p.isOut) continue;
             const toDiscard = p.hand.filter(c =>
               numbers.includes(c.number) || (numbers.includes(0) && c.isJoker)
             );
