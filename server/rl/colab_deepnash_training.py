@@ -207,6 +207,7 @@ class DoubtRoyaleEnv(gym.Env):
         self.total_env_steps = 0
         self.is_timeout = False
         self.face_up_cache = {}
+        self.known_elsewhere_counts = [0] * 14
         
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -235,6 +236,7 @@ class DoubtRoyaleEnv(gym.Env):
         self.total_turns = 0
         self.total_env_steps = 0
         self.is_timeout = False
+        self.known_elsewhere_counts = [0] * 14
         self._update_face_up_cache()
         
         return self._get_flat_obs(0), {}
@@ -315,6 +317,10 @@ class DoubtRoyaleEnv(gym.Env):
                 else:
                     valid = self._handle_play(0, num, cnt, True)
                     if valid:
+                        # 強カード(J, 2, A)の無謀なブラフへのペナルティ
+                        matching = [c for c in self.hands[0] if (0 if c["is_joker"] else c["number"]) == num]
+                        if num in [0, 1, 2] and len(matching) == 0:
+                            self.reward_buffer -= 3.0 # 追加ペナルティ
                         self.bluff_tracker.record_bluff_attempt(num)
                         if cnt > 1:
                             self.reward_buffer += self.reward_sys.get_reward('multi_play_bonus') * cnt
@@ -327,15 +333,13 @@ class DoubtRoyaleEnv(gym.Env):
             if action == 0: self._resolve_counter(0, 0); valid = True
             elif action == 106: valid = self._resolve_counter(0, 4)
             elif action == 107: valid = self._resolve_counter(0, 3)
-        elif self.phase == 'q_bomb':
-            if 108 <= action <= 121: self._apply_q_bomb(action - 107 if action <= 120 else 0); valid = True
-        elif self.phase == 'card_sel':
+        elif self.phase == 'card_sel' or self.phase == 'six_absorb':
             if 122 <= action <= 175: valid = self._apply_card_select(0, action - 122)
             
         if not valid:
             self._add_reward('invalid_action')
             if self.phase == 'q_bomb': self._apply_q_bomb(1)
-            elif self.phase == 'card_sel': self._apply_card_select(0, -1)
+            elif self.phase in ['card_sel', 'six_absorb']: self._apply_card_select(0, -1)
             elif self.phase == 'playing': 
                 if self.field["count"] == 0: self._force_play(0)
                 else: self._handle_pass(0)
@@ -415,6 +419,8 @@ class DoubtRoyaleEnv(gym.Env):
             
             if self.field["number"] == 8 or (self.field["number"] == 0 and self.field["count"] == 1):
                 self.phase = 'countering'; self.ask_idx = 1; self._set_ask_player()
+            elif self.field["number"] == 6:
+                self.phase = 'six_absorb'; self.active_player = self.field["last_player"]; return
             else: self._apply_effects()
         elif self.phase == 'countering': self._apply_effects()
 
@@ -445,6 +451,11 @@ class DoubtRoyaleEnv(gym.Env):
         # ダウト実行を記録
         self.bluff_tracker.record_doubt(is_lie)
         
+        # 公開情報を追跡
+        for c in cards:
+            n = 0 if c["is_joker"] else c["number"]
+            self.known_elsewhere_counts[n] = min(4 if n != 0 else 2, self.known_elsewhere_counts[n] + 1)
+
         if is_lie:
             self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
             # 見破られた嘘のカードを墓地へ送る（消滅バグの修正）
@@ -533,29 +544,55 @@ class DoubtRoyaleEnv(gym.Env):
             drops = [c for c in self.hands[i] if (c["number"] == num or (num==0 and c["is_joker"]))]
             self.hands[i] = [c for c in self.hands[i] if c not in drops]
             self.face_up_pool.extend(drops)
+            # 公開情報を更新
+            for c in drops:
+                n = 0 if c["is_joker"] else c["number"]
+                self.known_elsewhere_counts[n] = min(4 if n != 0 else 2, self.known_elsewhere_counts[n] + 1)
         self.turn_player = self._next_player(self.turn_player)
         self.active_player = self.turn_player; self.phase = 'playing'
 
     def _apply_card_select(self, p_idx, c_idx):
-        if c_idx < 0 or len(self.hands[p_idx]) == 0: c_idx = 0
-        if c_idx >= len(self.hands[p_idx]): return False
-        c = self.hands[p_idx].pop(c_idx)
-        if self.pending_effect == 7:
-            next_p = self._next_player(p_idx)
-            self.hands[next_p].append(c)
+        if self.phase == 'six_absorb':
+            # 墓地から吸収
+            if not self.face_up_pool: c_idx = -1
+            elif c_idx >= len(self.face_up_pool): c_idx = 0
+            
+            if c_idx >= 0:
+                c = self.face_up_pool.pop(c_idx)
+                # 自分が拾ったなら公開情報から除外（手札にあるので）
+                if p_idx == 0:
+                    n = 0 if c["is_joker"] else c["number"]
+                    self.known_elsewhere_counts[n] = max(0, self.known_elsewhere_counts[n] - 1)
+                self.hands[p_idx].append(c)
         else:
-            self.face_up_pool.append(c)
+            if c_idx < 0 or len(self.hands[p_idx]) == 0: c_idx = 0
+            if c_idx >= len(self.hands[p_idx]): return False
+            c = self.hands[p_idx].pop(c_idx)
+            if self.pending_effect == 7:
+                next_p = self._next_player(p_idx)
+                self.hands[next_p].append(c)
+            else:
+                self.face_up_pool.append(c)
+                # 他人が捨てたなら公開情報へ
+                if p_idx != 0:
+                    n = 0 if c["is_joker"] else c["number"]
+                    self.known_elsewhere_counts[n] = min(4 if n != 0 else 2, self.known_elsewhere_counts[n] + 1)
+                    
         self.turn_player = self._next_player(self.turn_player)
         self.active_player = self.turn_player; self.phase = 'playing'
+        self._update_face_up_cache()
         return True
 
     def _is_number_exposed(self, p_idx, num):
-        """Qボンバーで破壊されたカードが表墓地に全枚数見えているかチェック（キャッシュ版）"""
+        """Qボンバー・ダウト・6吸収・墓地情報を統合した露出判定（キャッシュ版）"""
         max_cards = 2 if num == 0 else 4
-        # face_up_poolの代わりにキャッシュを使用
-        face_up_count = self.face_up_cache.get(num, 0)
+        # 自分が持っていない合計既知枚数を計算
         my_count = sum(1 for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) == num)
-        return (face_up_count + my_count >= max_cards) and my_count == 0
+        # 他プレイヤーの手札(既知)または墓地にある枚数
+        elsewhere = self.known_elsewhere_counts[num]
+        
+        # (他国+自分)が全枚数に達し、かつ自分が1枚も持っていないなら100%嘘
+        return (elsewhere + my_count >= max_cards) and my_count == 0
 
     def _force_play(self, p_idx):
         if not self.hands[p_idx]: return
@@ -618,6 +655,11 @@ class DoubtRoyaleEnv(gym.Env):
         # 場より強い数字を宣言しつつ、実際には手札から適当なカードを出す
         for n, cards in groups.items():
             if self._is_number_exposed(p_idx, n): continue
+            
+            # 強カード(J, 2, A)を持っていない場合のブラフ抑制(70%でパス)
+            if n in [0, 1, 2] and len(groups[n]) == 0 and random.random() < 0.7:
+                continue
+                
             if len(cards) >= req_cnt and str_fn(n) > field_str:
                 # lie=True で呼ぶことで、宣言番号と異なるカードが実際に出される
                 self._handle_play(p_idx, n, req_cnt, True)
@@ -648,6 +690,7 @@ class DoubtRoyaleEnv(gym.Env):
                 elif self.phase == 'doubting': a = random.choice([0, 0, 105])  # 33%の確率でダウト
                 elif self.phase == 'countering': a = 0
                 elif self.phase == 'q_bomb': a = 108
+                elif self.phase in ['card_sel', 'six_absorb']: a = 122
                 else: a = 122
                 
             old_phase = self.phase
