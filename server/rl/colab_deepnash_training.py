@@ -150,6 +150,13 @@ class DynamicRewardSystem:
         self.recent_wins.append(1 if won else 0)
         if len(self.recent_wins) > 100: self.recent_wins.pop(0)
 
+    def record_timeout(self, is_timeout):
+        self.total_timeouts_count = getattr(self, 'total_timeouts_count', 0)
+        self.recent_timeouts = getattr(self, 'recent_timeouts', [])
+        self.recent_timeouts.append(1 if is_timeout else 0)
+        if len(self.recent_timeouts) > 100: self.recent_timeouts.pop(0)
+        if is_timeout: self.total_timeouts_count += 1
+
     def adjust(self, ep):
         if ep - self.last_adj_ep < 500 or len(self.recent_wins) < 100: return
         self.last_adj_ep = ep
@@ -195,6 +202,12 @@ class DoubtRoyaleEnv(gym.Env):
         # 122-175: Select Card Index (0-53)
         self.action_space = spaces.Discrete(176)
         
+        # 状態変数の宣言
+        self.total_turns = 0
+        self.total_env_steps = 0
+        self.is_timeout = False
+        self.face_up_cache = {}
+        
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         deck = [{"suit": s, "number": n, "id": f"{s}-{n}", "is_joker": False} for s in range(4) for n in range(1, 14)]
@@ -220,6 +233,7 @@ class DoubtRoyaleEnv(gym.Env):
         # 追加: パフォーマンス最適化・ターン制限用
         self.face_up_cache = {}
         self.total_turns = 0
+        self.total_env_steps = 0
         self.is_timeout = False
         self._update_face_up_cache()
         
@@ -259,6 +273,7 @@ class DoubtRoyaleEnv(gym.Env):
 
     def step(self, action):
         self.reward_buffer = 0.0
+        self.total_env_steps += 1 # 全体ステップ加算
         if self.player_out[0]: return self._get_flat_obs(0), 0.0, True, False, {}
 
         # プレイヤー0のターンでない場合
@@ -335,8 +350,8 @@ class DoubtRoyaleEnv(gym.Env):
         return self._get_flat_obs(0), self.reward_buffer, done, False, {}
 
     def _check_done(self):
-        # タイムアウト判定 (50ターン制限)
-        if self.total_turns >= 50:
+        # タイムアウト判定 (プレイターン100 or 全体ステップ2000)
+        if self.total_turns >= 100 or self.total_env_steps >= 2000:
             self.is_timeout = True
             return True, False
             
@@ -613,7 +628,9 @@ class DoubtRoyaleEnv(gym.Env):
 
     def _simulate_others(self):
         steps = 0
-        while self.active_player != 0 and sum(self.player_out) < self.num_players - 1 and steps < 200:
+        # 全体ステップ制限も考慮
+        while self.active_player != 0 and sum(self.player_out) < self.num_players - 1 and steps < 200 and self.total_env_steps < 2000:
+            self.total_env_steps += 1
             p = self.active_player
             if self.opponent_policies and len(self.opponent_policies) > p and self.opponent_policies[p] is not None:
                 # ダウトフェーズでは最低10%の確率で強制ダウト（探索促進）
@@ -775,9 +792,10 @@ def train():
 
         agent.update()
         
-        # 勝率には「1位になり生存しているか」のみを記録
+        # 勝敗記録と動的報酬調整
         is_first = len(env.hands[0]) == 0 and env.player_lives[0] > 0
         reward_sys.record_win(is_first)
+        reward_sys.record_timeout(env.is_timeout)
         reward_sys.adjust(ep)
 
         if ep % 10 == 0:
@@ -786,8 +804,9 @@ def train():
         if ep % 100 == 0:
             print("") # 改行
             wr = sum(reward_sys.recent_wins) / len(reward_sys.recent_wins) if reward_sys.recent_wins else 0
+            tr = sum(reward_sys.recent_timeouts) / len(reward_sys.recent_timeouts) if reward_sys.recent_timeouts else 0
             bluff_info = bluff_pass_tracker.get_summary()
-            print(f"EP {ep} | WinRate: {wr:.2%} | LastR: {ep_reward:.2f} | {bluff_info} | Time: {int(time.time()-start_time)}s")
+            print(f"EP {ep} | WinRate: {wr:.2%} | Timeouts: {tr:.1%} | LastR: {ep_reward:.2f} | {bluff_info} | Time: {int(time.time()-start_time)}s")
             
             # ディレクトリの存在を最終確認 (Colab 接続切れ対策)
             if not os.path.exists(SAVE_DIR):
