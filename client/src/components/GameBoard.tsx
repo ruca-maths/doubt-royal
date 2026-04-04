@@ -241,7 +241,7 @@ export default function GameBoard() {
             )}
 
             <div className="flex-1 flex justify-center gap-2">
-              {isMyTurn && gameState.phase === 'playing' && (
+              {isMyTurn && gameState.phase === 'playing' && myPlayer && !myPlayer.isOut && (
                 <>
                   <button
                     onClick={() => setShowPlayModal(true)}

@@ -1197,5 +1197,10 @@ export class GameEngine {
       if (log.playerId === oldId) log.playerId = newId;
       // Note: we keep log.playerName as is
     });
+
+    if (room.winRates && room.winRates[oldId] !== undefined) {
+      room.winRates[newId] = room.winRates[oldId];
+      delete room.winRates[oldId];
+    }
   }
 }

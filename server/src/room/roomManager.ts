@@ -136,6 +136,47 @@ export class RoomManager {
     return undefined;
   }
 
+  static reassignPlayerId(room: Room, oldId: string, newId: string): void {
+    if (oldId === newId) return;
+    
+    // 1. Update Room host
+    if (room.hostId === oldId) room.hostId = newId;
+    
+    // 2. Update player objects
+    for (const p of room.players) {
+      if (p.id === oldId) p.id = newId;
+    }
+    
+    // 3. Update turnOrder and finishOrder
+    room.turnOrder = room.turnOrder.map(id => id === oldId ? newId : id);
+    room.finishOrder = room.finishOrder.map(id => id === oldId ? newId : id);
+    
+    // 4. Update Field state
+    if (room.field.lastPlayerId === oldId) room.field.lastPlayerId = newId;
+    if (room.field.counteredBy === oldId) room.field.counteredBy = newId;
+    
+    // 5. Update Doubt systems
+    room.doubtDeclarers = room.doubtDeclarers.map(id => id === oldId ? newId : id);
+    room.doubtSkippers = room.doubtSkippers.map(id => id === oldId ? newId : id);
+    
+    // 6. Update Effects
+    if (room.pendingEffect) {
+      if (room.pendingEffect.playerId === oldId) room.pendingEffect.playerId = newId;
+      if (room.pendingEffect.targetPlayerId === oldId) room.pendingEffect.targetPlayerId = newId;
+    }
+    if (room.deferredEffect) {
+      if (room.deferredEffect.playerId === oldId) room.deferredEffect.playerId = newId;
+      if (room.deferredEffect.targetPlayerId === oldId) room.deferredEffect.targetPlayerId = newId;
+    }
+    if (room.pendingFinishPlayerId === oldId) room.pendingFinishPlayerId = newId;
+
+    // 7. Update WinRates keys
+    if (room.winRates && room.winRates[oldId] !== undefined) {
+      room.winRates[newId] = room.winRates[oldId];
+      delete room.winRates[oldId];
+    }
+  }
+
   static deleteRoom(roomId: string): void {
     const room = rooms.get(roomId);
     if (room?.doubtTimerId) {

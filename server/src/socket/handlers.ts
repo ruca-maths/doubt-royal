@@ -94,6 +94,8 @@ export function registerHandlers(io: Server): void {
         socket.emit('game-state', state);
 
         io.to(data.roomId).emit('room-update', updatedPayload);
+        socket.join(data.roomId);
+        broadcastGameState(io, room); 
       } else {
         const payload = {
           players: room.players.map(p => ({ 

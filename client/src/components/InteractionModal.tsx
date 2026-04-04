@@ -8,8 +8,11 @@ export default function InteractionModal() {
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
   const [selectedNumbers, setSelectedNumbers] = useState<number[]>([]);
 
+  const myPlayer = gameState?.players.find(p => p.id === myId);
+  const isOut = myPlayer?.isOut || (myPlayer && myPlayer.lives <= 0);
+
   const effect = gameState?.pendingEffect;
-  if (!effect || effect.playerId !== myId) return null;
+  if (!effect || effect.playerId !== myId || isOut) return null;
 
   const toggleCard = (cardId: string) => {
     // Phase 4: Prevent selecting excluded cards (destroyed by Q-Bomber)

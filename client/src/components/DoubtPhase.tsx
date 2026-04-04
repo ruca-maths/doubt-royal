@@ -39,17 +39,20 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
     return () => clearInterval(interval);
   }, [gameState?.phase, gameState?.field.lastPlayerId]);
 
+  const myPlayer = useMemo(() => gameState?.players.find(p => p.id === myId), [gameState?.players, myId]);
+  const isOut = myPlayer?.isOut || false;
+
   const handleDoubt = useCallback(() => {
-    if (hasActed || isMyCards) return;
+    if (hasActed || isMyCards || isOut) return;
     setHasActed(true);
     declareDoubt();
-  }, [hasActed, isMyCards, declareDoubt]);
+  }, [hasActed, isMyCards, isOut, declareDoubt]);
 
   const handleSkip = useCallback(() => {
-    if (hasActed || isMyCards) return;
+    if (hasActed || isOut) return;
     setHasActed(true);
     skipDoubt();
-  }, [hasActed, isMyCards, skipDoubt]);
+  }, [hasActed, isOut, skipDoubt]);
 
   // Doubt/Counter result overlay
   const { clearDoubtResult } = useGame();
@@ -187,11 +190,11 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
 
         {/* Buttons */}
         {isCounterPhase ? (
-          gameState.pendingEffect?.playerId === myId ? (
+          gameState.pendingEffect?.playerId === myId && !isOut ? (
             <div className="py-2 text-game-accent-light text-sm font-bold animate-pulse">
               🛡️ 待機中...
             </div>
-          ) : gameState.counterActorId === myId && !hasActed ? (
+          ) : gameState.counterActorId === myId && !hasActed && !isOut ? (
             <button
               onClick={handleSkip}
               className="w-full py-2 rounded-lg bg-game-card text-gray-400 text-sm font-bold"
@@ -202,6 +205,8 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
             <div className="py-2 text-gray-500 text-sm">判定待ち...</div>
           ) : hasActed ? (
             <div className="py-2 text-game-accent-light text-sm font-bold animate-pulse font-black">WAITING...</div>
+          ) : isOut ? (
+            <div className="py-2 text-gray-400 text-[10px] italic">観戦中...</div>
           ) : (
             <div className="py-2 text-gray-400 text-[10px]">
               {gameState.players.find(p => p.id === (gameState.pendingEffect?.playerId || gameState.counterActorId))?.name || '他者'} の判断待ち
@@ -210,7 +215,7 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
         ) : (
           /* Normal doubt logic */
           gameState.pendingEffect?.playerId === myId ? null : (
-            !isMyCards && !hasActed ? (
+            !isMyCards && !hasActed && !isOut ? (
               <div className="space-y-2">
                 <button
                   onClick={handleDoubt}
@@ -226,6 +231,8 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
                   スルー
                 </button>
               </div>
+            ) : isOut ? (
+              <div className="py-2 text-gray-400 text-[10px] italic">観戦中...</div>
             ) : isMyCards ? (
               <div className="py-2 text-gray-500 text-sm">判定待ち...</div>
             ) : (
