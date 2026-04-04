@@ -998,6 +998,9 @@ export class GameEngine {
     // or if their hand is empty and the board says they finished.
     const isSpectator = player?.isOut === true || room.finishOrder.includes(playerId) || (player && player.hand.length === 0 && player.rank !== null);
 
+    // Pre-calculate snapshots to avoid repeat work in map
+    const snapshots = isSpectator ? AIEngine.calculateSnapshotWinRates(room) : {};
+
     return {
       roomId: room.id,
       hostId: room.hostId,
@@ -1012,8 +1015,8 @@ export class GameEngine {
         isOut: p.isOut,
         isCurrentTurn: room.turnOrder[room.currentPlayerIndex] === p.id,
         rankStats: p.rankStats,
-        // Reliable win rate display for spectators
-        winRate: (isSpectator && room.winRates) ? room.winRates[p.id] : undefined,
+        // Reliable win rate display for spectators with instant fallback
+        winRate: isSpectator ? (room.winRates?.[p.id] ?? snapshots[p.id]) : undefined,
       })),
       field: {
         currentCardCount: room.field.currentCards.length,

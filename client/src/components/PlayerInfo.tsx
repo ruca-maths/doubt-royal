@@ -55,7 +55,7 @@ export default function PlayerInfo({ player, isMe }: PlayerInfoProps) {
         </div>
 
         {/* Win Rate (visible only to spectators) */}
-        {player.winRate !== undefined && !player.isOut && (
+        {typeof player.winRate === 'number' && !player.isOut && (
           <div className="mt-1 pt-1 border-t border-white/5">
             <div className="flex items-center justify-between mb-0.5">
               <span className="text-[8px] text-gray-500 font-bold">勝率</span>

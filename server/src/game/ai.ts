@@ -297,6 +297,44 @@ export class AIEngine {
 
   /**
    * Update win rates for all active players in the room.
+  /**
+   * Synchronous heuristic-based win rate calculation for immediate UI feedback.
+   */
+  static calculateSnapshotWinRates(room: Room): Record<string, number> {
+    const activePlayers = room.players.filter(p => !p.isOut && p.lives > 0);
+    if (activePlayers.length === 0) return {};
+
+    let totalScore = 0;
+    const scores: Record<string, number> = {};
+
+    for (const p of activePlayers) {
+      // Score based on hand size (fewer cards = better)
+      const handScore = Math.pow(Math.max(1, 20 - p.hand.length), 1.5) * 5;
+      // Score based on lives
+      const lifeScore = p.lives * 40;
+      // Score based on card quality
+      const cardQuality = p.hand.reduce((acc, c) => {
+        if (c.isJoker) return acc + 50;
+        if (c.number === 2) return acc + 30; // 2 is strong
+        if (c.number === 1) return acc + 20; // 1 is strong
+        if (c.number === 8 || c.number === 11 || c.number === 3 || c.number === 7) return acc + 10;
+        return acc + 5;
+      }, 0);
+
+      const score = handScore + lifeScore + cardQuality;
+      scores[p.id] = score;
+      totalScore += score;
+    }
+
+    const rates: Record<string, number> = {};
+    for (const p of activePlayers) {
+      rates[p.id] = Math.max(1, Math.min(99, Math.round((scores[p.id] / totalScore) * 100)));
+    }
+    return rates;
+  }
+
+  /**
+   * Deep Nash RL-based win rate calculation.
    * Called asynchronously after state changes; results are cached in room.winRates.
    */
   static async updateWinRates(room: Room): Promise<void> {
@@ -311,29 +349,7 @@ export class AIEngine {
     if (activePlayers.length === 0) return;
 
     if (!session) {
-      // Robust fallback heuristic: Hand size (50%) + Lives (30%) + Card Quality (20%)
-      let totalScore = 0;
-      const scores: Record<string, number> = {};
-
-      for (const p of activePlayers) {
-        const handScore = Math.pow(Math.max(1, 20 - p.hand.length), 1.5) * 5;
-        const lifeScore = p.lives * 40;
-        const cardQuality = p.hand.reduce((acc, c) => {
-          if (c.isJoker) return acc + 50;
-          if (c.number === 2) return acc + 30;
-          if (c.number === 1) return acc + 20;
-          if (c.number === 8 || c.number === 11 || c.number === 3 || c.number === 7) return acc + 10;
-          return acc + 5;
-        }, 0);
-
-        const score = handScore + lifeScore + cardQuality;
-        scores[p.id] = score;
-        totalScore += score;
-      }
-
-      for (const p of activePlayers) {
-        room.winRates[p.id] = Math.max(1, Math.min(99, Math.round((scores[p.id] / totalScore) * 100)));
-      }
+      room.winRates = this.calculateSnapshotWinRates(room);
       return;
     }
 
