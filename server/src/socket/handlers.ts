@@ -13,6 +13,7 @@ export function registerHandlers(io: Server): void {
     socket.on('create-room', (data: { playerName: string; persistentId: string }, callback) => {
       const room = RoomManager.createRoom(socket.id, data.playerName, data.persistentId);
       socket.join(room.id);
+      socket.join(socket.id); // For targeted emits via io.to(id)
       
       const payload = {
         players: room.players.map(p => ({ 
@@ -73,6 +74,7 @@ export function registerHandlers(io: Server): void {
       
       const room = result.room!;
       socket.join(data.roomId);
+      socket.join(socket.id); // For targeted emits via io.to(id)
 
       if (result.isRejoin && result.oldId) {
         GameEngine.reassignPlayerId(room, result.oldId, socket.id);

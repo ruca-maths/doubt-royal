@@ -48,10 +48,10 @@ export default function Card({ card, faceDown = false, selected = false, onClick
                 {getNumberDisplay(card.number)}
               </span>
             )}
-            <span className={`${small ? 'text-xl' : 'text-3xl'} leading-none flex items-center justify-center transition-transform`}>
+            <span className={`${small ? 'text-base' : 'text-xl'} leading-none flex items-center justify-center transition-transform`}>
               {getSuitSymbol(card.suit!)}
             </span>
-            <span className={`${small ? 'text-xs' : 'text-xl'} font-black leading-none ${textColor} card-rank ${small ? 'mt-0.5' : 'mt-1'}`}>
+            <span className={`${small ? 'text-[9px]' : 'text-base'} font-black leading-none ${textColor} card-rank ${small ? 'mt-0.5' : 'mt-0.5'}`}>
               {getNumberDisplay(card.number)}
             </span>
             {!small && (
