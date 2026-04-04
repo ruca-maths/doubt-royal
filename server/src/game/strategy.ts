@@ -505,24 +505,10 @@ export class StrategyEngine {
       }
     }
 
-    // パス（場が空の場合はパス不可 → 何でもいいから出す）
+    // Final fallback: if somehow still pass and field is empty, force first card
     if (isFieldEmpty && player.hand.length > 0) {
-      // 揃っているなら複数枚まとめて出す
-      const handByNumber = new Map<number, Card[]>();
-      player.hand.forEach(c => {
-        const num = c.isJoker ? 0 : c.number;
-        if (!handByNumber.has(num)) handByNumber.set(num, []);
-        handByNumber.get(num)!.push(c);
-      });
       const numToPlay = player.hand[0].isJoker ? 0 : player.hand[0].number;
-      const fallbackCards = handByNumber.get(numToPlay) || [player.hand[0]];
-      
-      // 禁止上がりでないか
-      if (player.hand.length - fallbackCards.length > 0 || !checkForbiddenFinish(numToPlay, fallbackCards, room.rules.isRevolution)) {
-        return { type: 'play', cards: fallbackCards, declaredNumber: numToPlay };
-      }
-      // 全部禁止上がり → 仕方なく出す
-      return { type: 'play', cards: fallbackCards, declaredNumber: numToPlay };
+      return { type: 'play', cards: [player.hand[0]], declaredNumber: numToPlay };
     }
 
     return { type: 'pass' };

@@ -176,11 +176,16 @@ export class AIEngine {
         
         const isFieldEmpty = room.field.currentCards.length === 0 || room.field.lastPlayerId === null || room.field.lastPlayerId === player.id;
         if (action.type === 'pass' && isFieldEmpty && player.hand.length > 0) {
+          console.warn(`[AI Guard] AI tried to PASS on empty field. Forcing play.`);
           if (StrategyEngine.hasData()) {
              action = StrategyEngine.decidePlay(playerId, room, player);
              if (action.type === 'pass') action = this.decidePlayActionHeuristic(room, player);
           } else {
              action = this.decidePlayActionHeuristic(room, player);
+          }
+          // Final sanity check: if still pass, force first card
+          if (action.type === 'pass' && player.hand.length > 0) {
+            action = { type: 'play', cards: [player.hand[0]], declaredNumber: player.hand[0].isJoker ? 0 : player.hand[0].number };
           }
         }
 
@@ -200,6 +205,9 @@ export class AIEngine {
 
         if (action.type === 'pass') {
           const result = GameEngine.passTurn(room, playerId);
+          if (!result.success) {
+            console.error(`[AI Error] Pass failed for ${playerId}: ${result.error}. Forcing sync.`);
+          }
           wrappedOnAction('pass', result);
         } else if (action.type === 'play' && action.cards) {
           const result = GameEngine.playCards(room, playerId, action.cards.map(c => c.id), action.declaredNumber!);
@@ -209,6 +217,7 @@ export class AIEngine {
           wrappedOnAction('pass', result);
         }
       } catch (err) {
+        console.error(`[AI Crash] ${playerId}:`, err);
         this.thinkingPlayers.delete(playerId);
         const result = GameEngine.passTurn(room, playerId);
         onAction('pass', result);
@@ -544,7 +553,9 @@ export class AIEngine {
     if (room.phase !== 'effectPhase' || !room.pendingEffect) return;
     const effect = room.pendingEffect;
     const player = room.players.find(p => p.id === effect.playerId);
-    if (!player || !player.isAI || player.isOut) return;
+    if (!player || !player.isAI) return;
+    // Allow isOut player to process if they are the target of the effect (e.g. giving cards after winning)
+    if (player.isOut && room.pendingEffect.playerId !== player.id) return;
     if (this.thinkingPlayers.has(player.id)) return;
     this.thinkingPlayers.add(player.id);
     const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
@@ -615,7 +626,15 @@ export class AIEngine {
             break;
           }
         }
-        GameEngine.handleEffectAction(room, effect.playerId, cardIds, targetData);
+        
+        // If hand is empty (already out), we send empty card list to proceed
+        if (player.hand.length === 0 && effect.type === 'doubtCardSelect') {
+          console.log(`[AI Guard] Empty hand AI completing doubt penalty.`);
+          GameEngine.handleEffectAction(room, effect.playerId, [], targetData);
+        } else {
+          GameEngine.handleEffectAction(room, effect.playerId, cardIds, targetData);
+        }
+        
         this.thinkingPlayers.delete(player.id);
         onAction();
       } catch (err) {

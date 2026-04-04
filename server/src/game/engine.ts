@@ -466,7 +466,8 @@ export class GameEngine {
       if (room.field.declaredNumber === 12 && room.field.pendingNumbers) {
         const numbers = room.field.pendingNumbers;
         for (const p of room.players) {
-          if (p.isOut) continue;
+          // Rule 13: Q-Bomber only targets OTHER players
+          if (p.isOut || p.id === result.honestPlayerId) continue;
           const toDiscard = p.hand.filter(c =>
             numbers.includes(c.number) || (numbers.includes(0) && c.isJoker)
           );
@@ -477,7 +478,10 @@ export class GameEngine {
         GameEngine.addLog(room, 'queenBomber', result.honestPlayerId, { targetNumbers: numbers });
         
         GameEngine.checkBombVictories(room);
-        if (room.phase === 'result') return;
+        if (room.phase === 'result') {
+          room.pendingEffect = null;
+          return;
+        }
 
         // Can only give "non-destroyed" cards
         (room.pendingEffect as any).excludedNumbers = [...numbers];
@@ -544,7 +548,8 @@ export class GameEngine {
           // Q-bomber survive doubt -> apply bomb
           const numbers = room.field.pendingNumbers;
           for (const p of room.players) {
-            if (p.isOut) continue;
+            // Rule 13: Q-Bomber only targets OTHER players
+            if (p.isOut || p.id === room.field.lastPlayerId) continue;
             const toDiscard = p.hand.filter(c =>
               numbers.includes(c.number) || (numbers.includes(0) && c.isJoker)
             );
@@ -555,7 +560,10 @@ export class GameEngine {
           GameEngine.addLog(room, 'queenBomber', room.field.lastPlayerId!, { targetNumbers: numbers });
 
           GameEngine.checkBombVictories(room);
-          if (room.phase === 'result') return;
+          if (room.phase === 'result') {
+            room.pendingEffect = null;
+            return;
+          }
 
           room.field.pendingNumbers = undefined;
           room.phase = 'playing';
@@ -865,10 +873,12 @@ export class GameEngine {
 
       case 'doubtCardSelect': {
         // Winner gives cards to Loser
-        if (cardIds.length > effect.count) {
-          return { success: false, error: `最大${effect.count}枚まで選択可能です` };
+        const actualGivableCount = Math.min(effect.count, player.hand.length);
+        if (cardIds.length > actualGivableCount) {
+          return { success: false, error: `最大${actualGivableCount}枚まで選択可能です` };
         }
-        if (cardIds.length === 0) break;
+        // Even if 0 cards to give (empty hand), we proceed to resolve the effect
+        // if (cardIds.length === 0) break; // Should allow completion
         const targetPlayer = room.players.find(p => p.id === effect.targetPlayerId);
         if (!targetPlayer) return { success: false, error: '対象プレイヤーが見つかりません' };
 
@@ -1093,6 +1103,8 @@ export class GameEngine {
     }
     
     room.phase = 'result';
+    room.pendingEffect = null;
+    room.deferredEffect = null;
     AIEngine.clearThinkingPlayers();
     
     // Update stats
