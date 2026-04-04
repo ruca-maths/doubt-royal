@@ -506,6 +506,7 @@ class DoubtRoyaleEnv(gym.Env):
             if self.player_lives[liar] <= 0: self.player_out[liar] = True
             
             self._give_worst_cards(p_idx, liar, n_cards)
+            if len(self.hands[p_idx]) == 0: self.player_out[p_idx] = True
             
             self.turn_player = self._next_player(self.turn_player); self.active_player = self.turn_player; self.phase = 'playing'
             return True
@@ -515,6 +516,7 @@ class DoubtRoyaleEnv(gym.Env):
             if self.player_lives[p_idx] <= 0: self.player_out[p_idx] = True
             
             self._give_worst_cards(liar, p_idx, n_cards)
+            if len(self.hands[liar]) == 0: self.player_out[liar] = True
             
             # Honest cards stay on the field
             self.turn_player = self._next_player(self.turn_player); self.active_player = self.turn_player; self.phase = 'playing'
@@ -535,7 +537,9 @@ class DoubtRoyaleEnv(gym.Env):
         self.field["last_player"] = p_idx
         
         self.turn_player = p_idx
+        self.countered = True
         self._apply_effects() # Counter resolves doubt phase directly
+        self.countered = False
         return True
 
     def _apply_effects(self):
@@ -565,6 +569,8 @@ class DoubtRoyaleEnv(gym.Env):
         # 8切りまたはカウンター成功時は場を流す
         if num == 8 or getattr(self, "countered", False):
             self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
+            if self.player_out[self.turn_player]:
+                self.turn_player = self._next_player(self.turn_player)
             # 8切りの場合はターン交代なし
         elif num == 5:
             self.turn_player = self._next_player(self._next_player(self.turn_player))
@@ -584,6 +590,8 @@ class DoubtRoyaleEnv(gym.Env):
             for c in drops:
                 n = 0 if c["is_joker"] else c["number"]
                 self.known_elsewhere_counts[n] = min(4 if n != 0 else 2, self.known_elsewhere_counts[n] + 1)
+            if len(self.hands[i]) == 0:
+                self.player_out[i] = True
         self.turn_player = self._next_player(self.turn_player)
         self.active_player = self.turn_player; self.phase = 'playing'
 
@@ -614,6 +622,9 @@ class DoubtRoyaleEnv(gym.Env):
                     n = 0 if c["is_joker"] else c["number"]
                     self.known_elsewhere_counts[n] = min(4 if n != 0 else 2, self.known_elsewhere_counts[n] + 1)
                     
+        if len(self.hands[p_idx]) == 0 and not self.player_out[p_idx]:
+             self.player_out[p_idx] = True
+
         self.turn_player = self._next_player(self.turn_player)
         self.active_player = self.turn_player; self.phase = 'playing'
         self._update_face_up_cache()
@@ -737,6 +748,13 @@ class DoubtRoyaleEnv(gym.Env):
         while self.active_player != 0 and sum(self.player_out) < self.num_players - 1 and steps < 200 and self.total_env_steps < 2000:
             self.total_env_steps += 1
             p = self.active_player
+            
+            if not self.hands[p] and not self.player_out[p]:
+                self.player_out[p] = True
+                self.active_player = self._next_player(p)
+                self.turn_player = self.active_player
+                continue
+                
             if self.opponent_policies and len(self.opponent_policies) > p and self.opponent_policies[p] is not None:
                 # ダウトフェーズでは最低10%の確率で強制ダウト（探索促進）
                 if self.phase == 'doubting' and random.random() < 0.10:
@@ -801,7 +819,7 @@ class DoubtRoyaleEnv(gym.Env):
                 else: self._resolve_counter(p, 0)
             elif self.phase == 'q_bomb':
                 self._apply_q_bomb(a - 107 if 108 <= a <= 120 else 0)
-            elif self.phase == 'card_sel':
+            elif self.phase in ['card_sel', 'six_absorb']:
                 self._apply_card_select(p, a - 122 if 122 <= a <= 175 else -1)
                 
             steps += 1
