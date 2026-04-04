@@ -127,9 +127,15 @@ function applySkipAndCheckLoop(room: Room, playerId: string, count: number): boo
 
 /**
  * Move cards to the appropriate graveyard based on their isFaceUp status.
+ * Ensures that card IDs are unique and removed from other field arrays first.
  */
 export function moveCardsToGrave(room: Room, cards: Card[]): void {
   for (const card of cards) {
+    // Remove from existing field/grave arrays to prevent duplication
+    room.field.currentCards = room.field.currentCards.filter(c => c.id !== card.id);
+    room.field.cardHistory = room.field.cardHistory.filter(c => c.id !== card.id);
+    room.field.faceUpPool = room.field.faceUpPool.filter(c => c.id !== card.id);
+
     if (card.isFaceUp) {
       room.field.faceUpPool.push(card);
     } else {
@@ -144,13 +150,20 @@ export function moveCardsToGrave(room: Room, cards: Card[]): void {
  */
 export function clearField(room: Room): void {
   // Move current cards to appropriate grave
-  moveCardsToGrave(room, room.field.currentCards);
-  room.field.currentCards = [];
+  const cardsToClear = [...room.field.currentCards];
+  room.field.currentCards = []; // Clear field first
+  moveCardsToGrave(room, cardsToClear);
 
   // Also move any revealed cards in history to face-up pool (Phase 14 fix)
+  // Ensure we don't duplicate them in faceUpPool
   const revealedInHistory = room.field.cardHistory.filter(c => c.isFaceUp);
-  room.field.faceUpPool.push(...revealedInHistory);
+  for (const card of revealedInHistory) {
+    if (!room.field.faceUpPool.some(c => c.id === card.id)) {
+      room.field.faceUpPool.push(card);
+    }
+  }
   room.field.cardHistory = room.field.cardHistory.filter(c => !c.isFaceUp);
+  
   room.field.declaredNumber = 0;
   room.field.lastPlayerId = null;
   room.field.doubtType = null;

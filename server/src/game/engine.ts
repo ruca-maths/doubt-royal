@@ -418,6 +418,10 @@ export class GameEngine {
         (room.pendingEffect as any).restoreEightCutAfter = true;
       }
       
+      // Cleanup
+      GameEngine.sanitizeGraveyards(room);
+      room.players.forEach(p => GameEngine.sanitizeHand(p));
+      
       // Note: We do NOT set liar.isSkipped = true.
       // Setting isSkipped would penalize them by skipping their *next* turn as well.
 
@@ -481,6 +485,10 @@ export class GameEngine {
           room.pendingEffect = null;
           return;
         }
+
+        // Cleanup
+        GameEngine.sanitizeGraveyards(room);
+        room.players.forEach(p => GameEngine.sanitizeHand(p));
 
         // Can only give "non-destroyed" cards
         (room.pendingEffect as any).excludedNumbers = [...numbers];
@@ -562,6 +570,10 @@ export class GameEngine {
             room.pendingEffect = null;
             return;
           }
+
+          // Cleanup
+          GameEngine.sanitizeGraveyards(room);
+          room.players.forEach(p => GameEngine.sanitizeHand(p));
 
           room.field.pendingNumbers = undefined;
           room.phase = 'playing';
@@ -1085,6 +1097,34 @@ export class GameEngine {
   static sanitizeHand(player: Player): void {
     const seenIds = new Set<string>();
     player.hand = player.hand.filter(card => {
+      if (seenIds.has(card.id)) return false;
+      seenIds.add(card.id);
+      return true;
+    });
+  }
+
+  /**
+   * Helper to ensure graveyard integrity (no duplicate card IDs).
+   */
+  static sanitizeGraveyards(room: Room): void {
+    const seenIds = new Set<string>();
+    
+    // Check current field
+    room.field.currentCards = room.field.currentCards.filter(card => {
+      if (seenIds.has(card.id)) return false;
+      seenIds.add(card.id);
+      return true;
+    });
+
+    // Check card history
+    room.field.cardHistory = room.field.cardHistory.filter(card => {
+      if (seenIds.has(card.id)) return false;
+      seenIds.add(card.id);
+      return true;
+    });
+
+    // Check face-up pool
+    room.field.faceUpPool = room.field.faceUpPool.filter(card => {
       if (seenIds.has(card.id)) return false;
       seenIds.add(card.id);
       return true;
