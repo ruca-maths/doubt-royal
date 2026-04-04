@@ -1009,10 +1009,8 @@ export class GameEngine {
         isOut: p.isOut,
         isCurrentTurn: room.turnOrder[room.currentPlayerIndex] === p.id,
         rankStats: p.rankStats,
-        // Only spectators (isOut players) can see win rates
-        ...(isSpectator && room.winRates && room.winRates[p.id] !== undefined
-          ? { winRate: room.winRates[p.id] }
-          : {}),
+        // Reliable win rate display for spectators
+        winRate: (isSpectator && room.winRates) ? room.winRates[p.id] : undefined,
       })),
       field: {
         currentCardCount: room.field.currentCards.length,

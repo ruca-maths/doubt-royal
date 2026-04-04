@@ -35,7 +35,7 @@ export class DoubtManager {
 
     // Can't doubt if out
     const player = room.players.find(p => p.id === playerId);
-    if (!player || player.isOut) return false;
+    if (!player || player.isOut || player.lives <= 0) return false;
 
     room.doubtDeclarers.push(playerId);
     return true;
@@ -48,7 +48,7 @@ export class DoubtManager {
     if (playerId === room.field.lastPlayerId) return false;
 
     const player = room.players.find(p => p.id === playerId);
-    if (!player || player.isOut) return false;
+    if (!player || player.isOut || player.lives <= 0) return false;
 
     if (!room.doubtSkippers.includes(playerId)) {
       room.doubtSkippers.push(playerId);
@@ -71,7 +71,7 @@ export class DoubtManager {
     if (playerId === room.field.lastPlayerId) return false;
     
     const player = room.players.find(p => p.id === playerId);
-    if (!player || player.isOut) return false;
+    if (!player || player.isOut || player.lives <= 0) return false;
 
     room.field.counteredBy = playerId;
     return true;
