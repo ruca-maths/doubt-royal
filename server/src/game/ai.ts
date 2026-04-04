@@ -300,42 +300,54 @@ export class AIEngine {
    * Called asynchronously after state changes; results are cached in room.winRates.
    */
   static async updateWinRates(room: Room): Promise<void> {
+    if (!room.winRates) room.winRates = {};
+    
     let session: ort.InferenceSession | null = null;
     try {
       session = await this.getSession();
     } catch (e) {}
 
+    const activePlayers = room.players.filter(p => !p.isOut);
+    if (activePlayers.length === 0) return;
+
     if (!session) {
-      // Fallback: heuristic win rate based on hand size and lives
-      const activePlayers = room.players.filter(p => !p.isOut);
-      if (activePlayers.length === 0) return;
-      
-      const rates: Record<string, number> = {};
-      const totalCards = activePlayers.reduce((sum, p) => sum + p.hand.length, 0);
-      
+      // Robust fallback heuristic: Hand size (50%) + Lives (30%) + Card Quality (20%)
+      let totalScore = 0;
+      const scores: Record<string, number> = {};
+
       for (const p of activePlayers) {
-        // Simple heuristic: fewer cards + more lives = higher win rate
-        const cardScore = totalCards > 0 ? (1 - p.hand.length / totalCards) : 0.5;
-        const lifeScore = p.lives / 3;
-        rates[p.id] = Math.round((cardScore * 0.6 + lifeScore * 0.4) * 100);
+        const handScore = Math.pow(Math.max(1, 20 - p.hand.length), 1.5) * 5;
+        const lifeScore = p.lives * 40;
+        const cardQuality = p.hand.reduce((acc, c) => {
+          if (c.isJoker) return acc + 50;
+          if (c.number === 2) return acc + 30;
+          if (c.number === 1) return acc + 20;
+          if (c.number === 8 || c.number === 11 || c.number === 3 || c.number === 7) return acc + 10;
+          return acc + 5;
+        }, 0);
+
+        const score = handScore + lifeScore + cardQuality;
+        scores[p.id] = score;
+        totalScore += score;
       }
-      room.winRates = rates;
+
+      for (const p of activePlayers) {
+        room.winRates[p.id] = Math.max(1, Math.min(99, Math.round((scores[p.id] / totalScore) * 100)));
+      }
       return;
     }
 
     try {
       const rates: Record<string, number> = {};
-      const activePlayers = room.players.filter(p => !p.isOut);
-      
       for (const player of activePlayers) {
         const stateVector = this.getStateVector(room, player);
         const criticValue = await this.getCriticValue(session, stateVector);
         rates[player.id] = this.criticToWinRate(criticValue);
       }
-      
       room.winRates = rates;
+      console.log(`[AI WinRate] Calculated room ${room.id} (${activePlayers.length} active)`);
     } catch (e) {
-      console.error('[AI] Failed to update win rates:', e);
+      console.error('[AI] Failed to update model-based win rates:', e);
     }
   }
 

@@ -344,14 +344,16 @@ function broadcastGameState(io: Server, room: import('../game/types').Room): voi
   const hasSpectators = room.players.some(p => p.isOut);
   if (hasSpectators && room.phase !== 'waiting' && room.phase !== 'result') {
     AIEngine.updateWinRates(room).then(() => {
-      // Re-broadcast to spectators with updated win rates
-      for (const player of room.players) {
-        if (player.isOut) {
-          const state = GameEngine.getClientState(room, player.id);
-          io.to(player.id).emit('game-state', state);
-        }
+      // Re-broadcast to EVERYTHING in the room so spectators get the new winRates
+      // getClientState(room, id) automatically handles winRate visibility based on isSpectator
+      for (const p of room.players) {
+        const state = GameEngine.getClientState(room, p.id);
+        io.to(p.id).emit('game-state', state);
       }
-    }).catch(() => {});
+      console.log(`[Spectator Sync] Updated win rates broadcast to room ${room.id}`);
+    }).catch((err) => {
+      console.error(`[Spectator Sync] Error updating win rates:`, err);
+    });
   }
 
   for (const player of room.players) {
