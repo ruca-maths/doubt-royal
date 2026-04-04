@@ -258,8 +258,8 @@ class DoubtRoyaleEnv(gym.Env):
         others = np.array([len(self.hands[i]) / 54.0 for i in range(self.num_players) if i != player_idx], dtype=np.float32)
         field_vec = np.array([self.field["number"] / 13.0, self.field["count"] / 4.0, (self.field["last_player"] + 1) / 4.0], dtype=np.float32)
         
-        phase_map = {'playing':0, 'doubting':1, 'countering':2, 'q_bomb':3, 'card_sel':4}
-        status_vec = np.array([self.is_revolution, self.is_eleven_back, phase_map[self.phase] / 4.0], dtype=np.float32)
+        phase_map = {'playing':0, 'doubting':1, 'countering':2, 'q_bomb':3, 'card_sel':4, 'six_absorb':5}
+        status_vec = np.array([self.is_revolution, self.is_eleven_back, phase_map.get(self.phase, 0) / 5.0], dtype=np.float32)
         
         face_up_counts = np.zeros(14, dtype=np.float32)
         for card in self.face_up_pool:
