@@ -11,15 +11,11 @@ interface CardProps {
 }
 
 export default function Card({ card, faceDown = false, selected = false, onClick, small = false }: CardProps) {
-  const w = small ? 'w-14' : 'w-20';
-  const h = small ? 'h-20' : 'h-28';
-
   if (faceDown) {
     return (
       <div
-        className={`card-container ${w} ${h} ${selected ? 'selected' : ''}`}
+        className={`card-container ${small ? 'card-small' : ''} ${selected ? 'selected' : ''}`}
         onClick={onClick}
-        style={{ width: small ? 56 : 80, height: small ? 80 : 112 }}
       >
         <div className="card-back" style={{ width: '100%', height: '100%' }} />
       </div>
@@ -33,9 +29,8 @@ export default function Card({ card, faceDown = false, selected = false, onClick
 
   return (
     <div
-      className={`card-container ${selected ? 'selected' : ''}`}
+      className={`card-container ${small ? 'card-small' : ''} ${selected ? 'selected' : ''}`}
       onClick={onClick}
-      style={{ width: small ? 56 : 80, height: small ? 80 : 112 }}
     >
       <div
         className={`card-face ${suitClass} ${selected ? 'ring-2 ring-game-accent ring-offset-2 ring-offset-game-bg' : ''}`}

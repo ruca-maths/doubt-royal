@@ -7,6 +7,20 @@
   --card-height: 120px;
 }
 
+@media (max-width: 768px), (max-height: 600px) {
+  :root {
+    --card-width: 60px;
+    --card-height: 90px;
+  }
+}
+
+@media (max-height: 450px) {
+  :root {
+    --card-width: 48px;
+    --card-height: 72px;
+  }
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -54,6 +68,11 @@ body::before {
 
 .card-container.selected {
   transform: translateY(-20px);
+}
+
+.card-container.card-small {
+  width: calc(var(--card-width) * 0.7);
+  height: calc(var(--card-height) * 0.7);
 }
 
 .card-inner {

@@ -105,7 +105,9 @@ export default function GameBoard() {
   }
 
   return (
-    <div className="min-h-screen relative overflow-hidden">
+    <div className="flex h-screen w-full overflow-hidden bg-[#0a0e1a]">
+      {/* Main Game Area */}
+      <div className="flex-1 relative overflow-hidden">
       {/* Game info bar */}
       <div className="absolute top-0 left-0 right-0 z-20">
         <div className="flex items-center justify-between px-6 py-3 glass-light">
@@ -204,7 +206,7 @@ export default function GameBoard() {
       </div>
 
       {/* Spacer to prevent overlap between field and my hand area */}
-      <div className="h-32" />
+      <div className="h-16 md:h-32" />
 
       {/* My hand area */}
       <div className="absolute bottom-0 left-0 right-0 z-20">
@@ -293,8 +295,7 @@ export default function GameBoard() {
       {/* Effect interaction modal */}
       <InteractionModal />
 
-      {/* Game Logs (Timeline) */}
-      <GameLog />
+      {/* Game Logs (Timeline) is now rendered in the right pane */}
 
       {/* FaceUp pool modal */}
       {showFaceUpPool && (
@@ -320,6 +321,12 @@ export default function GameBoard() {
           </div>
         </div>
       )}
+      </div>
+
+      {/* Right Pane: Timeline */}
+      <div className="w-56 sm:w-64 md:w-72 shrink-0 border-l border-white/10 relative bg-black/40 z-30">
+        <GameLog />
+      </div>
     </div>
   );
 }

@@ -82,8 +82,8 @@ export default function InteractionModal() {
       : (effect.type === 'queenBomber' ? selectedNumbers.length <= effect.count : selectedCardIds.length <= effect.count);
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] animate-fade-in">
-      <div className="glass rounded-2xl p-6 max-w-lg w-full mx-4 animate-slide-up">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] animate-fade-in p-4">
+      <div className="glass rounded-2xl p-6 max-w-lg w-full animate-slide-up max-h-[90vh] overflow-y-auto">
         <h3 className="text-xl font-bold text-center mb-1" style={{ fontFamily: 'Orbitron, sans-serif' }}>
           {titles[effect.type] || '特殊効果'}
         </h3>

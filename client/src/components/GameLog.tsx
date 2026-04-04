@@ -18,9 +18,7 @@ export default function GameLog() {
 
   return (
     <div 
-      className={`absolute right-4 top-20 bottom-32 glass rounded-2xl flex flex-col overflow-hidden z-20 border border-white/10 shadow-xl transition-all duration-300 ${
-        isOpen ? 'w-64 opacity-100' : 'w-12 h-12 opacity-80 overflow-hidden'
-      }`}
+      className="flex flex-col h-full w-full bg-black/20"
     >
       <div className="bg-black/60 p-3 border-b border-white/10 shrink-0 flex items-center justify-between">
         {isOpen && (

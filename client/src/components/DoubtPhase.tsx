@@ -94,10 +94,10 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
 
     return (
       <div 
-        className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 cursor-pointer"
+        className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 cursor-pointer p-4"
         onClick={clearDoubtResult}
       >
-        <div className={`animate-bounce-in rounded-2xl p-8 text-center glass shadow-2xl ${
+        <div className={`animate-bounce-in rounded-2xl p-8 text-center glass shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto ${
           isSuccess || isCounter ? 'border-game-accent/50' : 'border-game-danger/50'
         }`}>
           <div className="text-6xl mb-4">
@@ -147,8 +147,8 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
   const pendingNumbers = gameState.field.pendingNumbers;
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center pt-[-10vh] pb-[20vh] z-50 animate-fade-in pointer-events-none">
-      <div className="glass rounded-2xl p-6 max-w-sm w-full mx-4 text-center pointer-events-auto shadow-2xl border border-white/10 mt-[-100px]">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50 animate-fade-in pointer-events-none">
+      <div className="glass rounded-2xl p-6 max-w-sm w-full text-center pointer-events-auto shadow-2xl border border-white/10 max-h-[100dvh] overflow-y-auto">
         {/* Info */}
         <p className="text-gray-400 text-sm mb-2">
           {isCounterPhase 
