@@ -14,8 +14,8 @@ export default function Hand({ cards, selectedIds, onToggleSelect, disabled = fa
   const sorted = sortCards(cards);
 
   return (
-    <div className="w-full overflow-x-auto custom-scrollbar pb-4" style={{ minHeight: 150 }}>
-      <div className="flex justify-center items-end min-w-max px-4">
+    <div className="w-full overflow-x-auto custom-scrollbar">
+      <div className="flex justify-center items-end min-w-max px-2">
       <div
         className="flex items-end"
         style={{

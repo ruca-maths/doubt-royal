@@ -160,14 +160,14 @@ export default function GameBoard() {
           <div className="flex-1 flex flex-col items-center justify-center text-center px-1">
             {!isMyTurn && gameState.phase === 'playing' ? (
               <div className="glass-light rounded-lg px-2 py-1.5 animate-pulse">
-                <p className="text-[10px] text-gray-500 uppercase font-black">Waiting</p>
+                <p className="text-[10px] text-gray-500 uppercase font-black">待機中</p>
                 <p className="text-xs font-bold text-white truncate max-w-[80px]">
                   {gameState.players.find(p => p.id === gameState.currentPlayerId)?.name}
                 </p>
               </div>
             ) : isMyTurn && gameState.phase === 'playing' ? (
               <div className="bg-game-accent/20 border border-game-accent/30 rounded-lg px-2 py-1.5 animate-bounce-in">
-                <p className="text-[10px] text-game-accent-light uppercase font-black">Your Turn</p>
+                <p className="text-[10px] text-game-accent-light px-1 font-black">あなたの番</p>
               </div>
             ) : null}
           </div>
@@ -205,22 +205,22 @@ export default function GameBoard() {
                   )}
                 </>
               ) : (
-                <div className="text-gray-600 py-1 text-center font-bold text-xs">
-                  NO CARDS
+                <div className="text-gray-600 py-1 text-center font-extrabold text-[10px] uppercase tracking-tighter">
+                  カードなし
                 </div>
               )}
             </div>
           </div>
 
           {/* Right Column: Grave stats */}
-          <div className="flex-1 flex flex-col items-center justify-center gap-2">
-            <div className="text-center">
-              <p className="text-[9px] text-gray-500 uppercase">裏</p>
-              <p className="text-sm font-black text-gray-400 leading-none">{gameState.field.cardHistoryCount}</p>
+          <div className="flex-1 flex flex-col items-center justify-center gap-3">
+            <div className="text-center bg-black/20 rounded-lg p-2 border border-white/5 w-12">
+              <p className="text-[10px] text-gray-500 font-bold mb-0.5">裏</p>
+              <p className="text-xl font-black text-gray-400 leading-none">{gameState.field.cardHistoryCount}</p>
             </div>
-            <div className="text-center cursor-pointer bg-white/5 rounded-lg p-1 border border-white/5 hover:bg-white/10" onClick={() => setShowFaceUpPool(true)}>
-              <p className="text-[9px] text-game-accent-light uppercase">表</p>
-              <p className="text-sm font-black text-white glow-text-accent leading-none">{gameState.field.faceUpPool.length}</p>
+            <div className="text-center cursor-pointer bg-game-accent/10 rounded-lg p-2 border border-game-accent/20 w-12 hover:bg-game-accent/20 transition-all" onClick={() => setShowFaceUpPool(true)}>
+              <p className="text-[10px] text-game-accent-light font-bold mb-0.5">表</p>
+              <p className="text-xl font-black text-white glow-text-accent leading-none">{gameState.field.faceUpPool.length}</p>
             </div>
           </div>
         </div>
@@ -256,9 +256,9 @@ export default function GameBoard() {
                   </button>
                   <button
                     onClick={passTurn}
-                    className="px-3 py-1 rounded-lg font-bold text-xs bg-game-card/80 hover:bg-game-border text-gray-300 transition-all font-mono"
+                    className="px-4 py-1 rounded-lg font-bold text-xs bg-game-card/80 hover:bg-game-border text-gray-300 transition-all"
                   >
-                    PASS
+                    パス
                   </button>
                 </>
               )}
@@ -281,9 +281,9 @@ export default function GameBoard() {
             <div className="min-w-[60px]" /> {/* Spacer for symmetry */}
           </div>
 
-          {/* Hand Container - Reduced height and padding */}
-          <div className="px-2 py-0.5 h-[120px] overflow-hidden flex items-end">
-            <div className="w-full h-full">
+          {/* Hand Container - Stick to bottom */}
+          <div className="px-1 py-0 h-[120px] overflow-hidden flex items-end">
+            <div className="w-full h-full transform translate-y-[5px]">
               <Hand
                 cards={gameState.myHand}
                 selectedIds={selectedCardIds}

@@ -152,19 +152,19 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
         {/* Info */}
         <p className="text-gray-400 text-[10px] mb-1 font-bold uppercase tracking-tight">
           {isCounterPhase 
-            ? 'COUNTER CHECKING' 
+            ? 'カウンター確認中' 
             : (isCounterDoubt 
                 ? `${lastPlayerName} のカウンターへダウト？` 
                 : `${lastPlayerName}: ${gameState.field.currentCardCount}枚 ${isDiscard ? '捨' : '出'}`)}
         </p>
         
         <div className="text-2xl font-black mb-1 text-game-accent-light leading-none" style={{ fontFamily: 'Orbitron, sans-serif' }}>
-          {isCounterPhase ? 'WAITING' : `宣言: ${getDeclaredNumberDisplay(declaredNum)}`}
+          {isCounterPhase ? '待機中' : `宣言: ${getDeclaredNumberDisplay(declaredNum)}`}
         </div>
         {pendingNumbers && (
           <div className="bg-game-danger/20 border border-game-danger/30 rounded-md p-1 mb-2">
             <p className="text-game-danger text-[10px] font-black">
-              TARGET: {pendingNumbers.map(n => getDeclaredNumberDisplay(n)).join(', ')}
+              対象: {pendingNumbers.map(n => getDeclaredNumberDisplay(n)).join(', ')}
             </p>
           </div>
         )}
@@ -217,19 +217,19 @@ export default function DoubtPhase({ doubtResult }: DoubtPhaseProps) {
                   className="w-full py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-500 text-white text-xl font-black shadow-lg shadow-red-900/20 active:scale-95 transition-all"
                   style={{ fontFamily: 'Orbitron, sans-serif' }}
                 >
-                  DOUBT!
+                  ダウト！
                 </button>
                 <button
                   onClick={handleSkip}
                   className="w-full py-2 rounded-lg bg-white/5 text-gray-400 text-xs font-bold"
                 >
-                  SKIP
+                  スルー
                 </button>
               </div>
             ) : isMyCards ? (
               <div className="py-2 text-gray-500 text-sm">判定待ち...</div>
             ) : (
-              <div className="py-2 text-game-accent-light text-sm font-black animate-pulse">DONE</div>
+            <div className="py-2 text-game-accent-light text-sm font-black animate-pulse">完了</div>
             )
           )
         )}
