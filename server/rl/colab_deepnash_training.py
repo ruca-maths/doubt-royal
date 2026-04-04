@@ -302,7 +302,9 @@ class DoubtRoyaleEnv(gym.Env):
             self._simulate_others()
             done, is_win = self._check_done()
             if done:
-                if self.is_timeout: self.reward_buffer += -5.0 # タイムアウトペナルティ
+                if self.is_timeout:
+                    # 100ムーブ到達は「負け」と同等以上の重いペナルティ
+                    self.reward_buffer += -50.0
                 self._add_reward('win' if is_win else 'lose')
             return self._get_flat_obs(0), self.reward_buffer, done, False, {}
 
@@ -367,7 +369,9 @@ class DoubtRoyaleEnv(gym.Env):
         self._simulate_others()
         done, is_win = self._check_done()
         if done:
-            if self.is_timeout: self.reward_buffer += -5.0
+            if self.is_timeout:
+                # 100ムーブ到達は「負け」と同等以上の重いペナルティ
+                self.reward_buffer += -50.0
             self._add_reward('win' if is_win else 'lose')
         
         return self._get_flat_obs(0), self.reward_buffer, done, False, {}
