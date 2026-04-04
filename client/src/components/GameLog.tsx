@@ -2,9 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useGame } from '../contexts/GameContext';
 import { getDeclaredNumberDisplay } from '../utils/cardUtils';
 
-export default function GameLog() {
+interface GameLogProps {
+  isOpen: boolean;
+  onToggle: () => void;
+}
+
+export default function GameLog({ isOpen, onToggle }: GameLogProps) {
   const { gameState } = useGame();
-  const [isOpen, setIsOpen] = useState(true);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -27,7 +31,7 @@ export default function GameLog() {
           </h3>
         )}
         <button 
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={onToggle}
           className={`p-1 hover:bg-white/10 rounded transition-colors ${!isOpen ? 'w-full h-full' : ''}`}
           title={isOpen ? "隠す" : "履歴を表示"}
         >

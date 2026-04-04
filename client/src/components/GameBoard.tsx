@@ -14,6 +14,7 @@ export default function GameBoard() {
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
   const [showPlayModal, setShowPlayModal] = useState(false);
   const [showFaceUpPool, setShowFaceUpPool] = useState(false);
+  const [isLogOpen, setIsLogOpen] = useState(true);
 
   if (!gameState) return null;
 
@@ -329,8 +330,10 @@ export default function GameBoard() {
       )}
 
       {/* Right Pane: Timeline */}
-      <div className="w-48 sm:w-56 md:w-64 shrink-0 border-l border-white/10 relative bg-black/40 z-30">
-        <GameLog />
+      <div className={`transition-all duration-300 border-l border-white/10 relative bg-black/40 z-30 flex flex-col ${
+        isLogOpen ? 'w-48 sm:w-56 md:w-64' : 'w-10 overflow-hidden'
+      }`}>
+        <GameLog isOpen={isLogOpen} onToggle={() => setIsLogOpen(!isLogOpen)} />
       </div>
     </div>
   );
