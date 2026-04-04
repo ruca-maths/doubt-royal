@@ -136,7 +136,8 @@ export class GameEngine {
     if (declaredNumber === 12 && effectResult.pendingEffect) {
       room.pendingEffect = effectResult.pendingEffect;
       room.phase = 'effectPhase';
-      return { success: true, skipDoubt: true };
+      // We don't skip doubt entirely, we just move to effect phase FIRST.
+      return { success: true, skipDoubt: false };
     }
 
     if (room.rules.isRevolution !== (room.rules.isRevolution)) { // This is a bit tricky since applyCardEffect modifies it. 
@@ -993,7 +994,9 @@ export class GameEngine {
    */
   static getClientState(room: Room, playerId: string): ClientGameState {
     const player = room.players.find(p => p.id === playerId);
-    const isSpectator = player?.isOut === true;
+    // Explicitly check for isOut or if the player is in the finishOrder (meaning they successfully won)
+    // or if their hand is empty and the board says they finished.
+    const isSpectator = player?.isOut === true || room.finishOrder.includes(playerId) || (player && player.hand.length === 0 && player.rank !== null);
 
     return {
       roomId: room.id,
