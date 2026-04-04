@@ -191,7 +191,7 @@ export default function GameBoard() {
                     )}
                   </div>
                   <div className="text-2xl font-black text-game-accent-light leading-none text-center" style={{ fontFamily: 'Orbitron, sans-serif' }}>
-                    {getDeclaredNumberDisplay(gameState.field.declaredNumber)}
+                    {getDeclaredNumberDisplay(gameState.field.declaredNumber)} ({gameState.field.currentCardCount}枚)
                   </div>
                   
                   {gameState.field.pendingNumbers && gameState.field.pendingNumbers.length > 0 && (

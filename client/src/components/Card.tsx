@@ -38,24 +38,24 @@ export default function Card({ card, faceDown = false, selected = false, onClick
       >
         {isJoker ? (
           <div className="flex flex-col items-center justify-center">
-            <span className="text-3xl filter drop-shadow-sm">🃏</span>
-            <span className="text-[10px] font-black mt-1 tracking-widest opacity-80 uppercase">Joker</span>
+            <span className={`${small ? 'text-xl' : 'text-3xl'} filter drop-shadow-sm`}>🃏</span>
+            <span className={`${small ? 'text-[8px]' : 'text-[10px]'} font-black mt-0.5 tracking-widest opacity-80 uppercase`}>Joker</span>
           </div>
         ) : (
-          <div className="relative w-full h-full flex flex-col items-center justify-center">
+          <div className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden">
             {!small && (
-              <span className={`text-[10px] font-black absolute top-1.5 left-2 ${textColor} card-rank`}>
+              <span className={`text-[10px] font-black absolute top-1 left-1.5 ${textColor} card-rank`}>
                 {getNumberDisplay(card.number)}
               </span>
             )}
-            <span className={`text-3xl leading-none ${small ? 'text-2xl mt-1' : 'mb-1'} flex items-center justify-center transition-transform`}>
+            <span className={`${small ? 'text-xl' : 'text-3xl'} leading-none flex items-center justify-center transition-transform`}>
               {getSuitSymbol(card.suit!)}
             </span>
-            <span className={`text-xl font-black leading-none ${textColor} card-rank ${small ? 'mt-0.5 scale-90' : ''}`}>
+            <span className={`${small ? 'text-xs' : 'text-xl'} font-black leading-none ${textColor} card-rank ${small ? 'mt-0.5' : 'mt-1'}`}>
               {getNumberDisplay(card.number)}
             </span>
             {!small && (
-              <span className={`text-[10px] font-black absolute bottom-1.5 right-2 ${textColor} rotate-180 card-rank`}>
+              <span className={`text-[10px] font-black absolute bottom-1 right-1.5 ${textColor} rotate-180 card-rank`}>
                 {getNumberDisplay(card.number)}
               </span>
             )}
