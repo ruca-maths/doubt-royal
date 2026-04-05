@@ -32,6 +32,7 @@ export class AIEngine {
   private static getModelPath(): string {
     const cwd = process.cwd();
     const modelNames = [
+      'doubt_royale_v15_ep267000.onnx',
       'doubt_royale_latest.onnx',
       'doubt_royale_v15_ep91000.onnx',
       'doubt_royale_v15_ep27000.onnx',
@@ -287,12 +288,12 @@ export class AIEngine {
 
   /**
    * Convert raw critic value to a win rate percentage (0-100).
-   * Based on reward range: win=+100, lose=-30
+   * Based on normalized reward range: win=+1.0, lose=-1.0
    */
   private static criticToWinRate(value: number): number {
     // Clamp to expected range and normalize to 0-100%
-    const clamped = Math.max(-30, Math.min(100, value));
-    return Math.round(((clamped + 30) / 130) * 100);
+    const clamped = Math.max(-1.0, Math.min(1.0, value));
+    return Math.round(((clamped + 1.0) / 2.0) * 100);
   }
 
   /**
