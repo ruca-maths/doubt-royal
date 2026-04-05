@@ -36,6 +36,7 @@ export class RoomManager {
         declaredNumber: 0,
         cardHistory: [],
         faceUpPool: [],
+        roundPile: [],
         lastPlayerId: null,
         doubtType: null,
         counteredBy: null,
