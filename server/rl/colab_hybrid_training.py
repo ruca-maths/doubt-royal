@@ -139,7 +139,8 @@ class DynamicRewardSystem:
             'pass': -0.005,
             'invalid_action': -0.02,
             'forbidden_finish': -1.5,
-            'multi_play_bonus': 0.15
+            'multi_play_bonus': 0.15,
+            'impossible_bluff': -0.8
         }
         self.recent_wins = []
         self.last_adj_ep = 0
@@ -374,10 +375,14 @@ class DoubtRoyaleEnv(gym.Env):
             elif 53 <= action <= 104: 
                 num = ((action - 53) % 13) + 1
                 cnt = ((action - 53) // 13) + 1
-                # Qボンバー破壊カードでのブラフは即却下
-                if self._is_number_exposed(0, num, cnt):
+                # 論理的に不可能なブラフへのペナルティ（ジョーカー3枚など）
+                max_pos = 2 if num == 0 else 4
+                if cnt > max_pos:
+                    self._add_reward('impossible_bluff')
+                    valid = False
+                elif self._is_number_exposed(0, num, cnt):
                     self._add_reward('invalid_action')
-                    self.reward_buffer += -0.05  # 追加ペナルティ（正規化済み）
+                    self.reward_buffer += -0.05
                     valid = False
                 else:
                     valid = self._handle_play(0, num, cnt, True)
@@ -539,7 +544,10 @@ class DoubtRoyaleEnv(gym.Env):
         if count == 0: return
         rev = self.is_revolution != self.is_eleven_back
         def str_fn(c):
-             if c["is_joker"]: return 100
+             if c["is_joker"]: return 200 # 絶対保持
+             # スペードの3 (suit=3, number=3) をジョーカーの次に保護
+             if not c["is_joker"] and c["suit"] == 3 and c["number"] == 3: return 180 
+             
              v = c["number"] - 3 + 13 if c["number"] < 3 else c["number"] - 3
              return 12 - v if rev else v
         cards = sorted(self.hands[giver], key=str_fn)

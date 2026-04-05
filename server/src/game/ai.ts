@@ -390,9 +390,16 @@ export class AIEngine {
       return { type: 'pass' };
     }
 
-    // Q-Bomber awareness: don't declare a number that's fully visible in faceUpPool
+    // Q-Bomber awareness & impossible play prevention
     if (this.isNumberExposedInFaceUp(room, player, declaredNum)) {
       return { type: 'pass' };
+    }
+    
+    // Logic Guard: Prevent physically impossible declarations (Always 100% lie)
+    const maxAvailableInDeck = (declaredNum === 0 ? 2 : 4);
+    if (computedTargetCount > maxAvailableInDeck) {
+        // AI model tried to play impossible count (like 3 Jokers). Force into 1 or 2.
+        computedTargetCount = maxAvailableInDeck;
     }
 
     const fieldCardsCount = room.field.currentCards.length;
@@ -706,13 +713,25 @@ export class AIEngine {
                 cardIds.push(player.hand[cardIdx].id);
               } else {
                 const sortedHand = [...player.hand].sort((a, b) => {
-                  let rankA = (a.number === 2) ? 15 : (a.number === 1 ? 14 : (a.isJoker ? 16 : a.number));
-                  let rankB = (b.number === 2) ? 15 : (b.number === 1 ? 14 : (b.isJoker ? 16 : b.number));
+                  // Strategic card valuation (Higher value = Keep longer)
+                  const getStrength = (c: Card) => {
+                      if (c.isJoker) return 100;
+                      if (c.suit === 'spade' && c.number === 3) return 90; // Protect Spade 3 (Counter for Joker)
+                      if (c.number === 2) return 80;
+                      if (c.number === 1) return 70;
+                      if (c.number === 8 || c.number === 11) return 60;
+                      return c.number; // Higher card number is usually safer
+                  };
+                  
+                  const strengthA = getStrength(a);
+                  const strengthB = getStrength(b);
+                  
                   if (room.rules.isRevolution) {
-                    rankA = (a.number === 2) ? -15 : (a.number === 1 ? -14 : (a.isJoker ? 16 : -a.number));
-                    rankB = (b.number === 2) ? -15 : (b.number === 1 ? -14 : (b.isJoker ? 16 : -b.number));
+                      // In revolution, smaller numbers (excluding special cards) are stronger
+                      // but special cards (Joker, Spade 3) keep high priority
+                      return strengthA - strengthB; 
                   }
-                  return rankA - rankB;
+                  return strengthA - strengthB;
                 });
                 const excludedNumbers = (effect as any).excludedNumbers as number[] | undefined;
                 let availableCards = sortedHand;
