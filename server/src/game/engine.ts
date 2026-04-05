@@ -32,6 +32,7 @@ export class GameEngine {
       declaredNumber: 0,
       cardHistory: [],
       faceUpPool: [],
+      roundPile: [],
       lastPlayerId: null,
       doubtType: null,
       counteredBy: null,
@@ -217,8 +218,11 @@ export class GameEngine {
       const nextPlayer = room.players.find(p => p.id === room.turnOrder[room.currentPlayerIndex]);
       if (!nextPlayer) continue;
 
-      if (nextPlayer.isOut) {
-        console.log(`[Turn Advance] Skip ${nextPlayer.name} (isOut)`);
+      if (nextPlayer.isOut || nextPlayer.lives <= 0) {
+        console.log(`[Turn Advance] Skip ${nextPlayer.name} (isOut: ${nextPlayer.isOut}, lives: ${nextPlayer.lives})`);
+        if (nextPlayer.lives <= 0 && !nextPlayer.isOut) {
+          nextPlayer.isOut = true;
+        }
         continue;
       }
       if (nextPlayer.isSkipped) {
@@ -231,7 +235,7 @@ export class GameEngine {
       break;
     } while (true);
 
-    const activePlayers = room.players.filter(p => !p.isOut);
+    const activePlayers = room.players.filter(p => !p.isOut && p.lives > 0);
     const nextPlayerId = room.turnOrder[room.currentPlayerIndex];
     const lastPlayer = room.players.find(p => p.id === room.field.lastPlayerId);
     
@@ -278,7 +282,7 @@ export class GameEngine {
         // Phase 7: Route rollback cards (Joker) to appropriate graveyard
         // Joker was played face-down initially, so it goes to regular grave
         if (room.rollbackState) {
-          moveCardsToGrave(room, room.rollbackState.currentCards);
+          room.field.roundPile.push(...room.rollbackState.currentCards);
         }
         
         clearField(room);
@@ -306,7 +310,7 @@ export class GameEngine {
       // Phase 7: Route rollback cards (the original 8s) to appropriate graveyard
       // Original 8s were played face-down and never revealed -> regular grave
       if (room.rollbackState) {
-        moveCardsToGrave(room, room.rollbackState.currentCards);
+        room.field.roundPile.push(...room.rollbackState.currentCards);
       }
       
       clearField(room);
@@ -374,11 +378,14 @@ export class GameEngine {
         if (room.field.currentCards.length === 0) {
           room.field.hasFieldCleared = true;
         }
+
+        // Phase 4: Clear pending numbers if original play was a bomb
+        room.field.pendingNumbers = undefined;
       }
 
       // Check for field clear if everyone else failed to play (Requirement 6)
       // Done AFTER rollback so that the restored cards are properly cleared!
-      const activePlayers = room.players.filter(p => !p.isOut);
+      const activePlayers = room.players.filter(p => !p.isOut && p.lives > 0);
       if (room.passCount >= activePlayers.length - 1) {
         clearField(room);
         room.passCount = 0;
@@ -445,7 +452,7 @@ export class GameEngine {
 
       // The cards were honestly played, so previous cards go to history
       if (room.rollbackState && room.rollbackState.currentCards.length > 0) {
-        moveCardsToGrave(room, room.rollbackState.currentCards);
+        room.field.roundPile.push(...room.rollbackState.currentCards);
       }
 
       // Phase 14: Honest play is successful -> reset pass count
@@ -500,7 +507,7 @@ export class GameEngine {
       }
 
       // Check if game should end (doubter might be out due to life loss)
-      const activePlayers = room.players.filter(p => !p.isOut);
+      const activePlayers = room.players.filter(p => !p.isOut && p.lives > 0);
       if (activePlayers.length <= 1) {
         GameEngine.finalizeGame(room);
       } else {
@@ -519,7 +526,7 @@ export class GameEngine {
       room.passCount = 0;
       // The cards were accepted, so previous cards go to history
       if (room.rollbackState && room.rollbackState.currentCards.length > 0) {
-        moveCardsToGrave(room, room.rollbackState.currentCards);
+        room.field.roundPile.push(...room.rollbackState.currentCards);
       }
 
       // Check for 4-stop (8-cut survived) or Spade 3 (single Joker survived)
@@ -598,6 +605,8 @@ export class GameEngine {
           room.phase = 'playing';
           GameEngine.advanceTurn(room);
         }
+        // Always ensure pendingNumbers is cleared once we transition to normal play
+        room.field.pendingNumbers = undefined;
       }
     }
 
@@ -652,7 +661,7 @@ export class GameEngine {
     }
 
     // Check if game is over
-    const activePlayers = room.players.filter(p => !p.isOut);
+    const activePlayers = room.players.filter(p => !p.isOut && p.lives > 0);
     if (activePlayers.length <= 1) {
       GameEngine.finalizeGame(room);
     }
@@ -942,7 +951,7 @@ export class GameEngine {
       player.rank = room.finishOrder.length;
       player.isOut = true;
 
-      const activePlayersAfterEffect = room.players.filter(p => !p.isOut);
+      const activePlayersAfterEffect = room.players.filter(p => !p.isOut && p.lives > 0);
       if (activePlayersAfterEffect.length <= 1) {
         GameEngine.finalizeGame(room);
         return { success: true };
@@ -1022,6 +1031,7 @@ export class GameEngine {
         currentCardCount: room.field.currentCards.length,
         declaredNumber: room.field.declaredNumber,
         cardHistoryCount: room.field.cardHistory.length,
+        roundPileCount: room.field.roundPile.length,
         faceUpPool: room.field.faceUpPool,
         lastPlayerId: room.field.lastPlayerId,
         doubtType: room.field.doubtType,
@@ -1097,7 +1107,7 @@ export class GameEngine {
       room.finishOrder.push(player.id);
     }
 
-    const activePlayers = room.players.filter(p => !p.isOut);
+    const activePlayers = room.players.filter(p => !p.isOut && p.lives > 0);
     if (activePlayers.length <= 1) {
       GameEngine.finalizeGame(room);
     }
@@ -1144,7 +1154,7 @@ export class GameEngine {
   }
 
   static finalizeGame(room: Room): void {
-    const activePlayers = room.players.filter(p => !p.isOut);
+    const activePlayers = room.players.filter(p => !p.isOut && p.lives > 0);
     if (activePlayers.length === 1) {
       const lastPlayer = activePlayers[0];
       lastPlayer.isOut = true;

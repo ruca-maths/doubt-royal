@@ -29,8 +29,9 @@ export type GamePhase = 'waiting' | 'playing' | 'doubtPhase' | 'counterPhase' | 
 export interface FieldState {
   currentCards: Card[];       // cards just played or discarded (face-down)
   declaredNumber: number;     // number the player declared (1-13, 0=joker)
-  cardHistory: Card[];        // accumulated face-down cards on field (Grave)
+  cardHistory: Card[];        // cumulative face-down graveyard
   faceUpPool: Card[];         // revealed cards (Face-up Grave, for effect 6)
+  roundPile: Card[];          // cards played in the current round (pile on table)
   lastPlayerId: string | null;
   doubtType: 'play' | 'discard' | 'counter' | null;
   counteredBy: string | null;
@@ -151,6 +152,7 @@ export interface ClientFieldState {
   currentCardCount: number;
   declaredNumber: number;
   cardHistoryCount: number;
+  roundPileCount: number;
   faceUpPool: Card[];
   lastPlayerId: string | null;
   doubtType: 'play' | 'discard' | 'counter' | null;

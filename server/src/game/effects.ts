@@ -135,6 +135,7 @@ export function moveCardsToGrave(room: Room, cards: Card[]): void {
     room.field.currentCards = room.field.currentCards.filter(c => c.id !== card.id);
     room.field.cardHistory = room.field.cardHistory.filter(c => c.id !== card.id);
     room.field.faceUpPool = room.field.faceUpPool.filter(c => c.id !== card.id);
+    room.field.roundPile = room.field.roundPile.filter(c => c.id !== card.id);
 
     if (card.isFaceUp) {
       room.field.faceUpPool.push(card);
@@ -149,9 +150,10 @@ export function moveCardsToGrave(room: Room, cards: Card[]): void {
  * Cards go to appropriate grave based on their revealed status.
  */
 export function clearField(room: Room): void {
-  // Move current cards to appropriate grave
-  const cardsToClear = [...room.field.currentCards];
-  room.field.currentCards = []; // Clear field first
+  // Move current cards and round pile to appropriate grave
+  const cardsToClear = [...room.field.currentCards, ...room.field.roundPile];
+  room.field.currentCards = []; 
+  room.field.roundPile = [];
   moveCardsToGrave(room, cardsToClear);
 
   // Also move any revealed cards in history to face-up pool (Phase 14 fix)

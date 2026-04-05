@@ -185,7 +185,7 @@ export default function GameBoard() {
                         </div>
                       ))
                     ) : (
-                      Array.from({ length: gameState.field.currentCardCount }).map((_, i) => (
+                      Array.from({ length: gameState.field.currentCardCount + (gameState.field.roundPileCount || 0) }).map((_, i) => (
                         <div key={i} className="w-8 h-12 rounded-md card-back shadow-lg transform rotate-[-5deg]" style={{ marginLeft: i > 0 ? '-0.75rem' : '0' }} />
                       ))
                     )}
