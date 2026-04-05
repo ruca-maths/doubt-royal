@@ -64,7 +64,7 @@ export default function InteractionModal() {
     sevenPass: `手札から${effect.count}枚以下のカードを選んで次のプレイヤーに渡してください（0枚でも可）`,
     sixCollect: `表向き墓地から${effect.count}枚以下のカードを選んで手札に加えてください（0枚でも可）`,
     tenDiscard: `手札から${effect.count}枚以下のカードを選んで捨ててください（0枚でも可）`,
-    queenBomber: `最大${effect.count}個の数字を指定してください（全員がその数字を強制捨て。0個でも可）`,
+    queenBomber: `${effect.count}個の数字を指定してください（全員がその数字を強制捨て）`,
     doubtCardSelect: `自分の手札から${effect.count}枚以下のカードを選んで、相手に渡してください（0枚でも可）`,
     counterSelection: `${getDeclaredNumberDisplay(gameState?.field.declaredNumber === 8 ? 4 : 3)}を${effect.count}枚選んでカウンターしてください`,
   };
@@ -82,7 +82,7 @@ export default function InteractionModal() {
   const isReady =
     effect.type === 'counterSelection'
       ? selectedCardIds.length === effect.count
-      : (effect.type === 'queenBomber' ? selectedNumbers.length <= effect.count : selectedCardIds.length <= effect.count);
+      : (effect.type === 'queenBomber' ? selectedNumbers.length === effect.count : selectedCardIds.length <= effect.count);
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] animate-fade-in p-4">

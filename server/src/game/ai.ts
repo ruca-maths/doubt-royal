@@ -400,8 +400,15 @@ export class AIEngine {
     const targetCount = fieldCardsCount > 0 ? fieldCardsCount : computedTargetCount;
 
     const matchingCards = player.hand.filter(c => (c.isJoker ? 0 : c.number) === declaredNum);
-    if (!isLie && matchingCards.length >= targetCount) {
-        return { type: 'play', cards: matchingCards.slice(0, targetCount), declaredNumber: declaredNum };
+    
+    // AI Behavior Improvement: Force multiple cards play if honestly leading
+    if (!isLie) {
+        if (room.field.currentCards.length === 0) {
+            // When leading with honest cards, always play ALL matching cards to reduce hand size efficiently
+            return { type: 'play', cards: matchingCards, declaredNumber: declaredNum };
+        } else if (matchingCards.length >= targetCount) {
+            return { type: 'play', cards: matchingCards.slice(0, targetCount), declaredNumber: declaredNum };
+        }
     } else {
         const otherCards = player.hand.filter(c => (c.isJoker ? 0 : c.number) !== declaredNum);
         const available = otherCards.length >= targetCount ? otherCards : player.hand;
@@ -727,16 +734,48 @@ export class AIEngine {
                 }
                 return rankB - rankA;
               });
-              for (let i = 0; i < count; i++) cardIds.push(sortedPool[i].id);
+              
+              // Only pick decent cards (rank logic: 8 or above in normal strength)
+              const threshold = room.rules.isRevolution ? -8 : 8; // Adjust threshold based on revolution
+              for (let i = 0; i < count; i++) {
+                const c = sortedPool[i];
+                let rank = (c.number === 2) ? 15 : (c.number === 1 ? 14 : (c.isJoker ? 16 : c.number));
+                if (room.rules.isRevolution) {
+                  rank = (c.number === 2) ? -15 : (c.number === 1 ? -14 : (c.isJoker ? 16 : -c.number));
+                }
+                
+                // If it's a weak card, do not pick it up (unless it's revolution where negatives are stronger but we check rank size)
+                // Simplified decent logic: the cards are already sorted strongest first.
+                // If the strongest available isn't that great, we stop collecting.
+                if ((!room.rules.isRevolution && rank >= 8) || (room.rules.isRevolution && rank >= -8) || c.isJoker) {
+                   cardIds.push(c.id);
+                }
+              }
             }
             break;
           }
           case 'queenBomber': {
+            const numCount = effect.count;
+            const targetNumbers: number[] = [];
+            
+            // Generate the primary number to destroy
+            let primaryNum = 0;
             if (modelAction >= 108 && modelAction <= 121) {
-               targetData = { numbers: [modelAction - 107 === 14 ? 0 : modelAction - 107] };
+               primaryNum = modelAction - 107 === 14 ? 0 : modelAction - 107;
             } else {
-               targetData = { numbers: [Math.floor(Math.random() * 13) + 1] };
+               primaryNum = Math.floor(Math.random() * 13) + 1;
             }
+            targetNumbers.push(primaryNum);
+            
+            // Randomly select other numbers if we placed multiple Queens
+            const availableChoices = Array.from({ length: 14 }, (_, i) => i).filter(n => n !== primaryNum);
+            while (targetNumbers.length < numCount && availableChoices.length > 0) {
+               const randIdx = Math.floor(Math.random() * availableChoices.length);
+               targetNumbers.push(availableChoices[randIdx]);
+               availableChoices.splice(randIdx, 1);
+            }
+            
+            targetData = { numbers: targetNumbers };
             break;
           }
         }
