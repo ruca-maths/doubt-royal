@@ -242,6 +242,7 @@ class DoubtRoyaleEnv(gym.Env):
         self.is_timeout = False
         self.known_elsewhere_counts = [0] * 14
         self.q_bombs_remaining = 0
+        self.effect_count_remaining = 0 # 7, 10, 6用
         
         # ハイブリッドAI用メモリー
         self.destroyed_numbers = []  # Qボンバーで破壊された数字のリスト
@@ -428,12 +429,12 @@ class DoubtRoyaleEnv(gym.Env):
         return self._get_flat_obs(0), self.reward_buffer, done, False, {}
 
     def _check_done(self):
-        # Anti-Stall: AI(プレイヤー0)が50回以上行動したら強制敗北
-        if self.ai_action_count >= 50:
+        # Anti-Stall: AI(プレイヤー0)が80回以上行動したら強制敗北
+        if self.ai_action_count >= 80:
             self.is_timeout = True
             return True, False
-        # タイムアウト判定 (プレイターン100 or 全体ステップ2000)
-        if self.total_turns >= 100 or self.total_env_steps >= 2000:
+        # タイムアウト判定 (プレイターン150 or 全体ステップ3000)
+        if self.total_turns >= 150 or self.total_env_steps >= 3000:
             self.is_timeout = True
             return True, False
             
@@ -646,6 +647,7 @@ class DoubtRoyaleEnv(gym.Env):
             self.turn_destroyed_numbers = [] # ターン内の破壊履歴初期化
             self.phase = 'q_bomb'; self.active_player = self.turn_player; return
         if num in [7, 10] and not self.player_out[self.turn_player]:
+            self.effect_count_remaining = self.field["count"]
             self.phase = 'card_sel'; self.pending_effect = num; self.active_player = self.turn_player; return
         if num == 11:
             self.is_eleven_back = not self.is_eleven_back
@@ -658,6 +660,10 @@ class DoubtRoyaleEnv(gym.Env):
             # 8切りの場合はターン交代なし
         elif num == 5:
             self.turn_player = self._next_player(self._next_player(self.turn_player))
+        elif num == 6:
+            # 6の回収も枚数分ループ
+            self.effect_count_remaining = self.field["count"]
+            self.phase = 'six_absorb'; self.active_player = self.field["last_player"]; return
         else:
             self.turn_player = self._next_player(self.turn_player)
             
@@ -695,6 +701,13 @@ class DoubtRoyaleEnv(gym.Env):
         return True
 
     def _apply_card_select(self, p_idx, c_idx):
+        if c_idx < 0:
+             # パス（完了）扱い
+             self.effect_count_remaining = 0
+             self.turn_player = self._next_player(self.turn_player)
+             self.active_player = self.turn_player; self.phase = 'playing'
+             return True
+
         if self.phase == 'six_absorb':
             # 墓地から吸収
             if not self.face_up_pool: 
@@ -737,6 +750,16 @@ class DoubtRoyaleEnv(gym.Env):
                     
         if len(self.hands[p_idx]) == 0 and not self.player_out[p_idx]:
              self.player_out[p_idx] = True
+
+        self.effect_count_remaining -= 1
+        if self.effect_count_remaining > 0 and len(self.hands[p_idx]) > 0:
+            # まだ効果が残っている＋手札がある（または墓地がある）ならフェーズ維持
+            if self.phase == 'six_absorb' and not self.face_up_pool:
+                pass # 墓地が空なら終了へ
+            else:
+                self.active_player = self.turn_player
+                # 7, 10, 6 いずれも発動者のまま
+                return True
 
         self.turn_player = self._next_player(self.turn_player)
         self.active_player = self.turn_player; self.phase = 'playing'
