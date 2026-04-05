@@ -71,6 +71,7 @@ export interface ClientFieldState {
   currentCardCount: number;
   declaredNumber: number;
   cardHistoryCount: number;
+  roundPileCount: number;
   faceUpPool: Card[];
   lastPlayerId: string | null;
   doubtType: 'play' | 'discard' | 'counter' | null;
