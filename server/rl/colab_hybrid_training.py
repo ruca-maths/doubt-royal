@@ -302,6 +302,14 @@ class DoubtRoyaleEnv(gym.Env):
                 obs_full[79 + opp_idx] = self.bluff_memory[i]
                 opp_idx += 1
                 
+        # 追加: 手札の数字ごとのカウントを82〜95に格納 (0=Joker, 1~13=各数字)
+        hand_counts = [0] * 14
+        for card in self.hands[player_idx]:
+            n = 0 if card["is_joker"] else card["number"]
+            hand_counts[n] += 1
+        for n in range(14):
+            obs_full[82 + n] = hand_counts[n] / 4.0 # 0.0 ~ 1.0 に正規化 (ジョーカーは最大2なので0.5)
+
         return obs_full
 
     def _get_hand_potential(self, p_idx, is_rev, is_11b):
@@ -467,6 +475,8 @@ class DoubtRoyaleEnv(gym.Env):
     def _handle_play(self, p_idx, num, cnt, lie):
         if not self.hands[p_idx]: return False
         
+        is_empty_field = self.field["count"] == 0
+        
         # プレイ前のポテンシャル評価
         pot_before = self._get_hand_potential(p_idx, self.is_revolution, self.is_eleven_back)
         
@@ -507,6 +517,11 @@ class DoubtRoyaleEnv(gym.Env):
             forbidden = [8, 0, 2, 3 if self.is_revolution else -1]
             if num in forbidden:
                 self._add_reward('forbidden_finish')
+                
+        # 強カードの無駄遣いペナルティ
+        if p_idx == 0 and is_empty_field and len(cards) == 1 and num in [0, 1, 2]:
+            if len(self.hands[p_idx]) > 0:
+                self.reward_buffer -= 0.5
 
         new_rev = self.is_revolution
         if len(cards) >= 4: new_rev = not self.is_revolution
@@ -563,16 +578,19 @@ class DoubtRoyaleEnv(gym.Env):
         self.hands[receiver].extend(to_give)
 
     def _resolve_doubt(self, p_idx, is_doubt):
-        if not is_doubt:
-            self.ask_idx += 1; self._set_ask_player(); return False
-            
         liar = self.field["last_player"]
         cards = self.field["cards"]
         n_cards = len(cards)
         # ジョーカー（is_joker=True）は、どの数字の宣言に対しても「正直」とみなすように修正
         is_lie = any(not c["is_joker"] and c["number"] != self.field["number"] for c in cards)
         declared_num = self.field["number"]
-        
+
+        if not is_doubt:
+            # 相手が嘘をついていたのにスルーしてしまったペナルティ
+            if is_lie and p_idx == 0 and liar != 0:
+                self.reward_buffer -= 0.2
+            self.ask_idx += 1; self._set_ask_player(); return False
+            
         # ダウト実行を記録
         self.bluff_tracker.record_doubt(is_lie)
         
