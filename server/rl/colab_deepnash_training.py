@@ -128,18 +128,18 @@ bluff_pass_tracker = BluffPassTracker()
 class DynamicRewardSystem:
     def __init__(self):
         self.weights = {
-            'honest_play': 0.1,
-            'bluff_success': 0.2,
-            'bluff_caught': -2.0,
-            'doubt_success': 0.3,
-            'doubt_failure': -1.0,
-            'win': 100.0,
-            'lose': -30.0,
-            'step': -0.05,
-            'pass': -0.02,
-            'invalid_action': -0.1,
-            'forbidden_finish': -50.0,
-            'multi_play_bonus': 0.1
+            'honest_play': 0.02,
+            'bluff_success': 0.05,
+            'bluff_caught': -0.2,
+            'doubt_success': 0.1,
+            'doubt_failure': -0.15,
+            'win': 1.0,
+            'lose': -1.0,
+            'step': -0.001,
+            'pass': -0.005,
+            'invalid_action': -0.02,
+            'forbidden_finish': -1.5,
+            'multi_play_bonus': 0.02
         }
         self.recent_wins = []
         self.last_adj_ep = 0
@@ -158,12 +158,13 @@ class DynamicRewardSystem:
         if is_timeout: self.total_timeouts_count += 1
 
     def adjust(self, ep):
-        if ep - self.last_adj_ep < 500 or len(self.recent_wins) < 100: return
+        if ep - self.last_adj_ep < 2000 or len(self.recent_wins) < 100: return
         self.last_adj_ep = ep
         win_rate = sum(self.recent_wins) / len(self.recent_wins)
         diff = win_rate - 0.25
-        agg = max(0.8, min(1.2, 1.0 + diff * 0.5))
-        con = max(0.8, min(1.2, 1.0 - diff * 0.5))
+        # 調整レートを大幅に緩和 (0.1 -> 0.02)
+        agg = max(0.98, min(1.02, 1.0 + diff * 0.02))
+        con = max(0.98, min(1.02, 1.0 - diff * 0.02))
         
         self.weights['bluff_success'] *= agg
         self.weights['doubt_success'] *= agg
@@ -175,11 +176,11 @@ class DynamicRewardSystem:
         self.weights['multi_play_bonus'] *= con
 
         for k in ['bluff_success', 'doubt_success']:
-            self.weights[k] = min(max(self.weights[k], 0.05), 1.0)
-        self.weights['honest_play'] = min(max(self.weights['honest_play'], 0.01), 0.5)
-        self.weights['multi_play_bonus'] = min(max(self.weights['multi_play_bonus'], 0.01), 0.5)
+            self.weights[k] = min(max(self.weights[k], 0.01), 0.2)
+        self.weights['honest_play'] = min(max(self.weights['honest_play'], 0.005), 0.1)
+        self.weights['multi_play_bonus'] = min(max(self.weights['multi_play_bonus'], 0.005), 0.1)
         for k in ['doubt_failure', 'pass', 'invalid_action', 'bluff_caught']:
-            self.weights[k] = min(max(self.weights[k], -10.0), -0.01)
+            self.weights[k] = min(max(self.weights[k], -0.5), -0.001)
 
 class DoubtRoyaleEnv(gym.Env):
     def __init__(self, reward_sys, num_players=4):
@@ -235,6 +236,8 @@ class DoubtRoyaleEnv(gym.Env):
         self.face_up_cache = {}
         self.total_turns = 0
         self.total_env_steps = 0
+        self.ai_action_count = 0  # AI(プレイヤー0)の行動回数カウンター
+        self.pass_count = 0  # パスカウント（場流し判定用）
         self.is_timeout = False
         self.known_elsewhere_counts = [0] * 14
         self.q_bombs_remaining = 0
@@ -304,12 +307,13 @@ class DoubtRoyaleEnv(gym.Env):
             done, is_win = self._check_done()
             if done:
                 if self.is_timeout:
-                    # 100ムーブ到達は「負け」と同等以上の重いペナルティ
-                    self.reward_buffer += -50.0
-                self._add_reward('win' if is_win else 'lose')
+                    self._add_reward('lose')  # タイムアウトは敗北報酬
+                else:
+                    self._add_reward('win' if is_win else 'lose')
             return self._get_flat_obs(0), self.reward_buffer, done, False, {}
 
         # プレイヤー0のターン
+        self.ai_action_count += 1  # AI行動回数をカウント
         valid = False
         self._add_reward('step')
         if self.phase == 'playing':
@@ -334,7 +338,7 @@ class DoubtRoyaleEnv(gym.Env):
                 # Qボンバー破壊カードでのブラフは即却下
                 if self._is_number_exposed(0, num, cnt):
                     self._add_reward('invalid_action')
-                    self.reward_buffer += -0.5  # 追加ペナルティ
+                    self.reward_buffer += -0.05  # 追加ペナルティ（正規化済み）
                     valid = False
                 else:
                     valid = self._handle_play(0, num, cnt, True)
@@ -342,7 +346,7 @@ class DoubtRoyaleEnv(gym.Env):
                         # 強カード(J, 2, A)の無謀なブラフへのペナルティ
                         matching = [c for c in self.hands[0] if (0 if c["is_joker"] else c["number"]) == num]
                         if num in [0, 1, 2] and len(matching) == 0:
-                            self.reward_buffer -= 3.0 # 追加ペナルティ
+                            self.reward_buffer -= 0.1 # 無謀なブラフへの軽微なペナルティ（正規化済み）
                         self.bluff_tracker.record_bluff_attempt(num)
                         if cnt > 1:
                             self.reward_buffer += self.reward_sys.get_reward('multi_play_bonus') * cnt
@@ -365,25 +369,31 @@ class DoubtRoyaleEnv(gym.Env):
             elif self.phase == 'playing': 
                 if self.field["count"] == 0: self._force_play(0)
                 else: self._handle_pass(0)
+            elif self.phase == 'doubting': self._resolve_doubt(0, False)
+            elif self.phase == 'countering': self._resolve_counter(0, 0)
             else: self.active_player = self._next_player(self.active_player)
             
         self._simulate_others()
         done, is_win = self._check_done()
         if done:
             if self.is_timeout:
-                # 100ムーブ到達は「負け」と同等以上の重いペナルティ
-                self.reward_buffer += -50.0
-            self._add_reward('win' if is_win else 'lose')
+                self._add_reward('lose')  # タイムアウト/スタールは敗北報酬
+            else:
+                self._add_reward('win' if is_win else 'lose')
         
         return self._get_flat_obs(0), self.reward_buffer, done, False, {}
 
     def _check_done(self):
+        # Anti-Stall: AI(プレイヤー0)が50回以上行動したら強制敗北
+        if self.ai_action_count >= 50:
+            self.is_timeout = True
+            return True, False
         # タイムアウト判定 (プレイターン100 or 全体ステップ2000)
         if self.total_turns >= 100 or self.total_env_steps >= 2000:
             self.is_timeout = True
             return True, False
             
-        ai_won = len(self.hands[0]) == 0 and self.player_lives[0] > 0
+        ai_won = len(self.hands[0]) == 0 and self.player_lives[0] > 0 and not self.player_out[0]
         ai_dead = self.player_out[0]
         any_opp_won = any(len(self.hands[i]) == 0 and self.player_lives[i] > 0 for i in range(1, self.num_players))
         if ai_won: return True, True
@@ -397,7 +407,19 @@ class DoubtRoyaleEnv(gym.Env):
         return p
 
     def _handle_pass(self, p_idx):
-        if self.field["last_player"] in [-1, p_idx]: self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
+        if self.field["last_player"] in [-1, p_idx]:
+            # 自分が最後に出した場か空の場合、場を流す
+            self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
+            self.pass_count = 0
+            self.is_eleven_back = False
+        else:
+            self.pass_count += 1
+            # 全アクティブプレイヤーがパスしたら場を流す
+            active_count = sum(1 for i in range(self.num_players) if not self.player_out[i])
+            if self.pass_count >= active_count - 1:
+                self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
+                self.pass_count = 0
+                self.is_eleven_back = False
         self.turn_player = self._next_player(p_idx)
         self.active_player = self.turn_player
         return True
@@ -433,6 +455,7 @@ class DoubtRoyaleEnv(gym.Env):
                 
         self.hands[p_idx] = [c for c in self.hands[p_idx] if c["id"] not in [cp["id"] for cp in cards]]
         self.field.update({"number": num, "count": len(cards), "last_player": p_idx, "cards": cards})
+        self.pass_count = 0  # カードが出たらパスカウントリセット
         
         new_rev = self.is_revolution
         if len(cards) >= 4: new_rev = not self.is_revolution
@@ -440,12 +463,12 @@ class DoubtRoyaleEnv(gym.Env):
         # プレイ後のポテンシャル評価
         pot_after = self._get_hand_potential(p_idx, new_rev, self.is_eleven_back)
         
-        # 戦略的プレイ報酬 (革命で有利になった、または複数枚出しで手が整った)
+        # 戦略的プレイ報酬 (正規化済み)
         if p_idx == 0:
             if pot_after > pot_before:
-                self.reward_buffer += (pot_after - pot_before) * 10.0 # ポテンシャル向上ボーナス
+                self.reward_buffer += (pot_after - pot_before) * 0.5
             elif pot_after < pot_before and len(cards) >= 4:
-                self.reward_buffer -= 2.0 # 不利な革命へのペナルティ
+                self.reward_buffer -= 0.1
 
         if len(cards) >= 4: self.is_revolution = not self.is_revolution
         
@@ -565,7 +588,7 @@ class DoubtRoyaleEnv(gym.Env):
                 self.player_out[self.turn_player] = True
                 if self.turn_player == 0:
                     # 自身のペナルティ
-                    pass 
+                    self.reward_buffer += self.reward_sys.get_reward('forbidden_finish')
             else:
                 # 合法的な勝利
                 self.player_out[self.turn_player] = True
@@ -773,7 +796,7 @@ class DoubtRoyaleEnv(gym.Env):
                 # ダウトフェーズでは最低10%の確率で強制ダウト（探索促進）
                 if self.phase == 'doubting' and random.random() < 0.10:
                     a = 105
-                elif random.random() < 0.2:
+                elif random.random() < 0.05:  # 20% -> 5% に削減（対称性改善）
                     a = -1
                 else:
                     with torch.no_grad():
@@ -831,10 +854,7 @@ class DoubtRoyaleEnv(gym.Env):
                         if self.field["count"] == 0: self._force_play(p)
                         else: self._handle_pass(p)
                     else:
-                        pass_prob = self.bluff_tracker.get_pass_probability(num)
-                        if self.field["count"] > 0 and random.random() < pass_prob:
-                            self._handle_pass(p)
-                        elif not self._handle_play(p, num, cnt, True): 
+                        if not self._handle_play(p, num, cnt, True): 
                             if self.field["count"] == 0: self._force_play(p)
                             else: self._handle_pass(p)
                         else:
@@ -859,13 +879,22 @@ class DoubtRoyaleEnv(gym.Env):
 class ActorCriticNet(nn.Module):
     def __init__(self, obs_dim=114, action_dim=176):
         super().__init__()
-        self.fc1 = nn.Linear(obs_dim, 256)
-        self.fc2 = nn.Linear(256, 256)
+        self.fc1 = nn.Linear(obs_dim, 512)
+        self.ln1 = nn.LayerNorm(512)
+        self.fc2 = nn.Linear(512, 512)
+        self.ln2 = nn.LayerNorm(512)
+        self.fc3 = nn.Linear(512, 256)
+        self.ln3 = nn.LayerNorm(256)
         self.actor = nn.Linear(256, action_dim)
         self.critic = nn.Linear(256, 1)
+        # Critic出力層の初期化を改善
+        nn.init.orthogonal_(self.critic.weight, gain=1.0)
+        nn.init.constant_(self.critic.bias, 0.0)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x)); x = F.relu(self.fc2(x))
+        x = F.relu(self.ln1(self.fc1(x)))
+        x = F.relu(self.ln2(self.fc2(x)))
+        x = F.relu(self.ln3(self.fc3(x)))
         return F.softmax(self.actor(x), dim=-1), self.critic(x)
 
 class DeepNashAgent:
@@ -896,10 +925,11 @@ class DeepNashAgent:
         states, actions = torch.cat(self.states), torch.cat(self.actions)
         for _ in range(4):
             probs, values = self.policy(states); dist = Categorical(probs); logprobs = dist.log_prob(actions)
+            entropy = dist.entropy()  # 探索促進用エントロピー
             with torch.no_grad(): ref_probs, _ = self.ref_policy(states)
             kl = (probs * (torch.log(probs + 1e-10) - torch.log(ref_probs + 1e-10))).sum(-1)
             adv = rewards - values.detach().squeeze()
-            loss = -(logprobs * adv).mean() + 0.5 * F.mse_loss(values.squeeze(), rewards) + self.kl_coeff * kl.mean()
+            loss = -(logprobs * adv).mean() + 0.5 * F.mse_loss(values.squeeze(), rewards) + self.kl_coeff * kl.mean() - 0.01 * entropy.mean()
             self.optimizer.zero_grad(); loss.backward()
             torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
             self.optimizer.step()
@@ -935,6 +965,7 @@ def train():
     opponent_pool = []
     
     start_time = time.time()
+    total_ep_reward = 0
     for ep in range(start_ep, 500001):
         if opponent_pool: env.opponent_policies = [None] + [random.choice(opponent_pool) for _ in range(3)]
         else: env.opponent_policies = [None] + [agent.policy] * 3
@@ -945,7 +976,8 @@ def train():
             obs, reward, done, _, _ = env.step(action)
             agent.rewards.append(reward); agent.dones.append(done)
             ep_reward += reward
-
+        
+        total_ep_reward += ep_reward
         agent.update()
         
         # 勝敗記録と動的報酬調整
@@ -961,8 +993,10 @@ def train():
             print("") # 改行
             wr = sum(reward_sys.recent_wins) / len(reward_sys.recent_wins) if reward_sys.recent_wins else 0
             tr = sum(reward_sys.recent_timeouts) / len(reward_sys.recent_timeouts) if reward_sys.recent_timeouts else 0
+            avg_r = total_ep_reward / 100
             bluff_info = bluff_pass_tracker.get_summary()
-            print(f"EP {ep} | WinRate: {wr:.2%} | Timeouts: {tr:.1%} | LastR: {ep_reward:.2f} | {bluff_info} | Time: {int(time.time()-start_time)}s")
+            print(f"EP {ep} | WinRate: {wr:.2%} | Timeouts: {tr:.1%} | AvgR: {avg_r:.2f} | {bluff_info} | Time: {int(time.time()-start_time)}s")
+            total_ep_reward = 0
             
             # ディレクトリの存在を最終確認 (Colab 接続切れ対策)
             if not os.path.exists(SAVE_DIR):

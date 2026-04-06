@@ -129,22 +129,31 @@ class DynamicRewardSystem:
     def __init__(self):
         self.weights = {
             'honest_play': 0.02,
-            'bluff_success': 0.05,
-            'bluff_caught': -0.2,
+            'bluff_success': 0.02,   # 勝率改善：ブラフ成功を下げて稼ぎを防止 (0.1 -> 0.02)
+            'bluff_caught': -0.4,
             'doubt_success': 0.1,
             'doubt_failure': -0.15,
-            'win': 1.0,
+            'win': 5.0,              # 勝率改善：勝利をとにかく高く評価 (1.0 -> 5.0)
             'lose': -1.0,
-            'step': -0.001,
+            'step': -0.01,           # 勝率改善：無駄な時間浪費へのペナルティ強化 (-0.001 -> -0.01)
             'pass': -0.005,
-            'invalid_action': -0.02,
+            'invalid_action': -0.05,
             'forbidden_finish': -5.0,
-            'multi_play_bonus': 0.5,
+            'multi_play_bonus': 0.02,
             'impossible_bluff': -0.8,
-            'field_clear': 0.2,
-            'reckless_bluff': -0.8
+            'field_clear': 0.1,
+            'reckless_bluff': -0.4,
+            'life_lost': -0.4
         }
         self.recent_wins = []
+        self.recent_timeouts = []
+        self.recent_bluff_caught = []
+        self.recent_bluffs = []
+        self.recent_doubts = []
+        self.recent_doubt_success = []
+        self.recent_actions = []
+        self.recent_invalid_actions = []
+        self.total_timeouts_count = 0
         self.last_adj_ep = 0
 
     def get_reward(self, event): return self.weights.get(event, 0.0)
@@ -154,38 +163,103 @@ class DynamicRewardSystem:
         if len(self.recent_wins) > 100: self.recent_wins.pop(0)
 
     def record_timeout(self, is_timeout):
-        self.total_timeouts_count = getattr(self, 'total_timeouts_count', 0)
-        self.recent_timeouts = getattr(self, 'recent_timeouts', [])
         self.recent_timeouts.append(1 if is_timeout else 0)
         if len(self.recent_timeouts) > 100: self.recent_timeouts.pop(0)
         if is_timeout: self.total_timeouts_count += 1
 
+    def record_bluff_attempt(self):
+        self.recent_bluffs.append(1)
+        self.recent_bluff_caught.append(0)
+        if len(self.recent_bluffs) > 100:
+            self.recent_bluffs.pop(0)
+            self.recent_bluff_caught.pop(0)
+
+    def record_bluff_caught(self):
+        if len(self.recent_bluff_caught) > 0:
+            self.recent_bluff_caught[-1] = 1
+
+    def record_doubt(self, success):
+        self.recent_doubts.append(1)
+        self.recent_doubt_success.append(1 if success else 0)
+        if len(self.recent_doubts) > 100:
+            self.recent_doubts.pop(0)
+            self.recent_doubt_success.pop(0)
+
+    def record_action(self, valid):
+        self.recent_actions.append(1)
+        self.recent_invalid_actions.append(0 if valid else 1)
+        if len(self.recent_actions) > 500:
+            self.recent_actions.pop(0)
+            self.recent_invalid_actions.pop(0)
+
     def adjust(self, ep):
         if ep - self.last_adj_ep < 2000 or len(self.recent_wins) < 100: return
         self.last_adj_ep = ep
-        win_rate = sum(self.recent_wins) / len(self.recent_wins)
-        diff = win_rate - 0.25
-        # 調整レートを大幅に緩和 (0.1 -> 0.02)
-        agg = max(0.98, min(1.02, 1.0 + diff * 0.02))
-        con = max(0.98, min(1.02, 1.0 - diff * 0.02))
         
-        self.weights['bluff_success'] *= agg
-        self.weights['doubt_success'] *= agg
-        self.weights['doubt_failure'] *= con
-        self.weights['invalid_action'] *= con
-        self.weights['pass'] *= con
-        self.weights['bluff_caught'] *= con
-        self.weights['honest_play'] *= con
-        self.weights['multi_play_bonus'] *= con
-        self.weights['field_clear'] *= con
-        self.weights['reckless_bluff'] *= con
+        # 勝率ベースの微調整 (カードを減らすことの重要度 & ポジティブ行動の奨励)
+        win_rate = sum(self.recent_wins) / len(self.recent_wins)
+        if win_rate < 0.2:
+            self.weights['win'] = min(self.weights['win'] + 0.5, 10.0) # 勝利への執着を高める
+            self.weights['step'] = max(self.weights['step'] - 0.005, -0.05) # スタールペナルティ強化
+            self.weights['honest_play'] = min(self.weights['honest_play'] + 0.005, 0.05)
+            self.weights['field_clear'] = min(self.weights['field_clear'] + 0.01, 0.2)
+            self.weights['multi_play_bonus'] = min(self.weights['multi_play_bonus'] + 0.005, 0.05)
+        elif win_rate > 0.3:
+            self.weights['win'] = max(self.weights['win'] - 0.5, 5.0)
+            self.weights['step'] = min(self.weights['step'] + 0.005, -0.01)
+            self.weights['honest_play'] = max(self.weights['honest_play'] - 0.005, 0.005)
+            self.weights['field_clear'] = max(self.weights['field_clear'] - 0.01, 0.05)
+            self.weights['multi_play_bonus'] = max(self.weights['multi_play_bonus'] - 0.005, 0.005)
 
-        for k in ['bluff_success', 'doubt_success', 'field_clear']:
-            self.weights[k] = min(max(self.weights[k], 0.01), 0.3)
-        self.weights['honest_play'] = min(max(self.weights['honest_play'], 0.005), 0.1)
-        self.weights['multi_play_bonus'] = min(max(self.weights['multi_play_bonus'], 0.1), 1.0)
-        for k in ['doubt_failure', 'pass', 'invalid_action', 'bluff_caught', 'reckless_bluff']:
-            self.weights[k] = min(max(self.weights[k], -1.0), -0.001)
+        # タイムアウト率ベースの調整 (遅延行為のペナルティ強化)
+        timeout_rate = sum(self.recent_timeouts) / max(len(self.recent_timeouts), 1)
+        if timeout_rate > 0.4:
+            self.weights['step'] = max(self.weights['step'] - 0.005, -0.05)
+            self.weights['pass'] = max(self.weights['pass'] - 0.002, -0.02)
+        else:
+            self.weights['step'] = min(self.weights['step'] + 0.005, -0.01)
+            self.weights['pass'] = min(self.weights['pass'] + 0.002, -0.002)
+            
+        # 無効アクション（ルール違反）ベースの調整
+        action_count = sum(self.recent_actions)
+        if action_count > 0:
+            invalid_rate = sum(self.recent_invalid_actions) / action_count
+            if invalid_rate > 0.05:
+                # エラー多すぎ: ペナルティ重く
+                self.weights['invalid_action'] = max(self.weights['invalid_action'] - 0.01, -0.1)
+                self.weights['impossible_bluff'] = max(self.weights['impossible_bluff'] - 0.05, -1.0)
+                self.weights['forbidden_finish'] = max(self.weights['forbidden_finish'] - 0.5, -7.0)
+            elif invalid_rate < 0.01:
+                # エラー少ない: ペナルティを少し緩和
+                self.weights['invalid_action'] = min(self.weights['invalid_action'] + 0.005, -0.01)
+                self.weights['impossible_bluff'] = min(self.weights['impossible_bluff'] + 0.05, -0.4)
+                self.weights['forbidden_finish'] = min(self.weights['forbidden_finish'] + 0.2, -3.0)
+
+        # ブラフ発覚率ベースの調整 (強気・弱気の調整)
+        bluff_count = sum(self.recent_bluffs)
+        if bluff_count > 0:
+            caught_rate = sum(self.recent_bluff_caught) / bluff_count
+            if caught_rate > 0.4:
+                # バレすぎ：ペナルティ重く
+                self.weights['bluff_caught'] = max(self.weights['bluff_caught'] - 0.05, -0.8)
+                self.weights['reckless_bluff'] = max(self.weights['reckless_bluff'] - 0.05, -0.8)
+            elif caught_rate < 0.2:
+                # バレなすぎ：ペナルティ軽く
+                self.weights['bluff_caught'] = min(self.weights['bluff_caught'] + 0.02, -0.2)
+                self.weights['reckless_bluff'] = min(self.weights['reckless_bluff'] + 0.02, -0.2)
+
+        # ダウト成功率ベースの調整 (無謀なダウトの抑制)
+        doubt_count = sum(self.recent_doubts)
+        if doubt_count > 0:
+            ds_rate = sum(self.recent_doubt_success) / doubt_count
+            if ds_rate < 0.25:
+                # 失敗しすぎ：ダウト失敗とライフ減少のペナルティを強化
+                self.weights['doubt_failure'] = max(self.weights['doubt_failure'] - 0.05, -0.5)
+                self.weights['life_lost'] = max(self.weights['life_lost'] - 0.05, -1.0)
+            elif ds_rate > 0.4:
+                # 慎重すぎ：ペナルティを少し緩和して探索を促す
+                self.weights['doubt_failure'] = min(self.weights['doubt_failure'] + 0.02, -0.1)
+                self.weights['life_lost'] = min(self.weights['life_lost'] + 0.02, -0.3)
 
 class DoubtRoyaleEnv(gym.Env):
     def __init__(self, reward_sys, num_players=4):
@@ -395,6 +469,7 @@ class DoubtRoyaleEnv(gym.Env):
                         if num in [0, 1, 2] and len(matching) == 0:
                             self._add_reward('reckless_bluff')
                         self.bluff_tracker.record_bluff_attempt(num)
+                        self.reward_sys.record_bluff_attempt()
                         if cnt > 1:
                             self.reward_buffer += self.reward_sys.get_reward('multi_play_bonus') * cnt
         elif self.phase == 'doubting':
@@ -402,12 +477,15 @@ class DoubtRoyaleEnv(gym.Env):
             elif action == 105: 
                 suc = self._resolve_doubt(0, True); valid = True
                 self._add_reward('doubt_success' if suc else 'doubt_failure')
+                self.reward_sys.record_doubt(suc)
         elif self.phase == 'countering':
             if action == 0: self._resolve_counter(0, 0); valid = True
             elif action == 106: valid = self._resolve_counter(0, 4)
             elif action == 107: valid = self._resolve_counter(0, 3)
         elif self.phase == 'card_sel' or self.phase == 'six_absorb':
             if 122 <= action <= 175: valid = self._apply_card_select(0, action - 122)
+            
+        self.reward_sys.record_action(valid)
             
         if not valid:
             self._add_reward('invalid_action')
@@ -427,6 +505,9 @@ class DoubtRoyaleEnv(gym.Env):
                 self._add_reward('lose')  # タイムアウト/スタールは敗北報酬
             else:
                 self._add_reward('win' if is_win else 'lose')
+        
+        # 1ステップあたりの総報酬を強制クリップ（無限ループ稼ぎなどによる発散防止）
+        self.reward_buffer = min(max(self.reward_buffer, -1.0), 1.0)
         
         return self._get_flat_obs(0), self.reward_buffer, done, False, {}
 
@@ -521,7 +602,7 @@ class DoubtRoyaleEnv(gym.Env):
         # 強カードの無駄遣いペナルティ
         if p_idx == 0 and is_empty_field and len(cards) == 1 and num in [0, 1, 2]:
             if len(self.hands[p_idx]) > 0:
-                self.reward_buffer -= 0.5
+                self.reward_buffer -= 0.05
 
         new_rev = self.is_revolution
         if len(cards) >= 4: new_rev = not self.is_revolution
@@ -535,6 +616,12 @@ class DoubtRoyaleEnv(gym.Env):
                 self.reward_buffer += (pot_after - pot_before) * 0.5
             elif pot_after < pot_before and len(cards) >= 4:
                 self.reward_buffer -= 0.1
+                
+            # 手札枚数削減フェーズのボーナス（上がりへの期待値を高めるため、少ない手札からのプレイを高く評価）
+            remaining = len(self.hands[p_idx])
+            if remaining <= 5:
+                # 5枚以下に出せたら、残り枚数に応じて +0.1 〜 +0.5 の大きなボーナス
+                self.reward_buffer += (5 - remaining) * 0.1 + 0.1
 
         if len(cards) >= 4: self.is_revolution = not self.is_revolution
         
@@ -603,13 +690,17 @@ class DoubtRoyaleEnv(gym.Env):
             self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
             # 見破られた嘘のカードを墓地へ送る（消滅バグの修正）
             self.face_up_pool.extend(cards)
-            if liar == 0: self._add_reward('bluff_caught') # Player 0がバレた
+            if liar == 0:
+                self.reward_buffer += self.reward_sys.get_reward('bluff_caught') * n_cards
+                self.reward_sys.record_bluff_caught()
             elif p_idx == 0: pass # step側で成功報酬処理済み
             
             # ブラフ発覚を記録
             self.bluff_tracker.record_bluff_caught(declared_num)
             
             self.player_lives[liar] -= 1
+            if liar == 0:
+                self._add_reward('life_lost')
             if self.player_lives[liar] <= 0: self.player_out[liar] = True
             
             self._give_worst_cards(p_idx, liar, n_cards)
@@ -635,10 +726,16 @@ class DoubtRoyaleEnv(gym.Env):
             self.ask_idx += 1; self._set_ask_player()
             return True
             
-        has_card = any(c["number"] == counter_num for c in self.hands[p_idx])
-        if not has_card: return False
-        
-        c_card = next(c for c in self.hands[p_idx] if c["number"] == counter_num)
+        if counter_num == 3:
+            # Spade 3 は s=3(Spade) 且つ n=3 に限定する (is_jokerではない)
+            has_card = any(c["number"] == 3 and c["suit"] == 3 and not c["is_joker"] for c in self.hands[p_idx])
+            if not has_card: return False
+            c_card = next(c for c in self.hands[p_idx] if c["number"] == 3 and c["suit"] == 3 and not c["is_joker"])
+        else: # counter_num == 4
+            has_card = any(c["number"] == 4 and not c["is_joker"] for c in self.hands[p_idx])
+            if not has_card: return False
+            c_card = next(c for c in self.hands[p_idx] if c["number"] == 4 and not c["is_joker"])
+            
         self.hands[p_idx] = [c for c in self.hands[p_idx] if c["id"] != c_card["id"]]
         self.field["cards"].append(c_card)
         self.field["last_player"] = p_idx
