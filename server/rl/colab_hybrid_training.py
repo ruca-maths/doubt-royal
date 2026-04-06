@@ -129,13 +129,13 @@ class DynamicRewardSystem:
     def __init__(self):
         self.weights = {
             'honest_play': 0.02,
-            'bluff_success': 0.02,   # 勝率改善：ブラフ成功を下げて稼ぎを防止 (0.1 -> 0.02)
+            'bluff_success': 0.05,   # Phase 7: 勝率改善、過度な慎重さを緩和 (0.02 -> 0.05)
             'bluff_caught': -0.4,
             'doubt_success': 0.1,
             'doubt_failure': -0.15,
-            'win': 5.0,              # 勝率改善：勝利をとにかく高く評価 (1.0 -> 5.0)
+            'win': 5.0,              # Phase 6/7: 勝利への執着 (維持)
             'lose': -1.0,
-            'step': -0.01,           # 勝率改善：無駄な時間浪費へのペナルティ強化 (-0.001 -> -0.01)
+            'step': -0.002,          # Phase 7: ステップペナルティ過剰すぎたため緩和 (-0.01 -> -0.002)
             'pass': -0.005,
             'invalid_action': -0.05,
             'forbidden_finish': -5.0,
@@ -143,7 +143,8 @@ class DynamicRewardSystem:
             'impossible_bluff': -0.8,
             'field_clear': 0.1,
             'reckless_bluff': -0.4,
-            'life_lost': -0.4
+            'life_lost': -0.4,
+            'card_removed': 0.05     # Phase 7: 手札を減らしたこと自体への中間目標報酬
         }
         self.recent_wins = []
         self.recent_timeouts = []
@@ -200,24 +201,26 @@ class DynamicRewardSystem:
         win_rate = sum(self.recent_wins) / len(self.recent_wins)
         if win_rate < 0.2:
             self.weights['win'] = min(self.weights['win'] + 0.5, 10.0) # 勝利への執着を高める
-            self.weights['step'] = max(self.weights['step'] - 0.005, -0.05) # スタールペナルティ強化
-            self.weights['honest_play'] = min(self.weights['honest_play'] + 0.005, 0.05)
+            self.weights['step'] = min(self.weights['step'] + 0.001, -0.001) # Phase 7: スタールペナルティを緩和し探索を促す
+            self.weights['honest_play'] = min(self.weights['honest_play'] + 0.01, 0.1)
+            self.weights['card_removed'] = min(self.weights.get('card_removed', 0.05) + 0.01, 0.2)
             self.weights['field_clear'] = min(self.weights['field_clear'] + 0.01, 0.2)
             self.weights['multi_play_bonus'] = min(self.weights['multi_play_bonus'] + 0.005, 0.05)
         elif win_rate > 0.3:
             self.weights['win'] = max(self.weights['win'] - 0.5, 5.0)
-            self.weights['step'] = min(self.weights['step'] + 0.005, -0.01)
-            self.weights['honest_play'] = max(self.weights['honest_play'] - 0.005, 0.005)
+            self.weights['step'] = max(self.weights['step'] - 0.001, -0.005)
+            self.weights['honest_play'] = max(self.weights['honest_play'] - 0.005, 0.02)
+            self.weights['card_removed'] = max(self.weights.get('card_removed', 0.05) - 0.005, 0.05)
             self.weights['field_clear'] = max(self.weights['field_clear'] - 0.01, 0.05)
             self.weights['multi_play_bonus'] = max(self.weights['multi_play_bonus'] - 0.005, 0.005)
 
         # タイムアウト率ベースの調整 (遅延行為のペナルティ強化)
         timeout_rate = sum(self.recent_timeouts) / max(len(self.recent_timeouts), 1)
         if timeout_rate > 0.4:
-            self.weights['step'] = max(self.weights['step'] - 0.005, -0.05)
+            self.weights['step'] = max(self.weights['step'] - 0.002, -0.01)
             self.weights['pass'] = max(self.weights['pass'] - 0.002, -0.02)
         else:
-            self.weights['step'] = min(self.weights['step'] + 0.005, -0.01)
+            self.weights['step'] = min(self.weights['step'] + 0.001, -0.002)
             self.weights['pass'] = min(self.weights['pass'] + 0.002, -0.002)
             
         # 無効アクション（ルール違反）ベースの調整
@@ -612,6 +615,9 @@ class DoubtRoyaleEnv(gym.Env):
         
         # 戦略的プレイ報酬 (正規化済み)
         if p_idx == 0:
+            # Phase 7: 手札を減らしたこと自体への中間目標報酬（枚数分）
+            self.reward_buffer += self.reward_sys.get_reward('card_removed') * len(cards)
+            
             if pot_after > pot_before:
                 self.reward_buffer += (pot_after - pot_before) * 0.5
             elif pot_after < pot_before and len(cards) >= 4:
@@ -619,9 +625,8 @@ class DoubtRoyaleEnv(gym.Env):
                 
             # 手札枚数削減フェーズのボーナス（上がりへの期待値を高めるため、少ない手札からのプレイを高く評価）
             remaining = len(self.hands[p_idx])
-            if remaining <= 5:
-                # 5枚以下に出せたら、残り枚数に応じて +0.1 〜 +0.5 の大きなボーナス
-                self.reward_buffer += (5 - remaining) * 0.1 + 0.1
+            # 全ての段階でボーナスを与え、少ないほど大きくする
+            self.reward_buffer += max(0, 10 - remaining) * 0.05
 
         if len(cards) >= 4: self.is_revolution = not self.is_revolution
         
