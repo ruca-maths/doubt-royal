@@ -138,9 +138,11 @@ class DynamicRewardSystem:
             'step': -0.001,
             'pass': -0.005,
             'invalid_action': -0.02,
-            'forbidden_finish': -1.5,
-            'multi_play_bonus': 0.15,
-            'impossible_bluff': -0.8
+            'forbidden_finish': -5.0,
+            'multi_play_bonus': 0.5,
+            'impossible_bluff': -0.8,
+            'field_clear': 0.2,
+            'reckless_bluff': -0.8
         }
         self.recent_wins = []
         self.last_adj_ep = 0
@@ -175,13 +177,15 @@ class DynamicRewardSystem:
         self.weights['bluff_caught'] *= con
         self.weights['honest_play'] *= con
         self.weights['multi_play_bonus'] *= con
+        self.weights['field_clear'] *= con
+        self.weights['reckless_bluff'] *= con
 
-        for k in ['bluff_success', 'doubt_success']:
-            self.weights[k] = min(max(self.weights[k], 0.01), 0.2)
+        for k in ['bluff_success', 'doubt_success', 'field_clear']:
+            self.weights[k] = min(max(self.weights[k], 0.01), 0.3)
         self.weights['honest_play'] = min(max(self.weights['honest_play'], 0.005), 0.1)
-        self.weights['multi_play_bonus'] = min(max(self.weights['multi_play_bonus'], 0.01), 0.3)
-        for k in ['doubt_failure', 'pass', 'invalid_action', 'bluff_caught']:
-            self.weights[k] = min(max(self.weights[k], -0.5), -0.001)
+        self.weights['multi_play_bonus'] = min(max(self.weights['multi_play_bonus'], 0.1), 1.0)
+        for k in ['doubt_failure', 'pass', 'invalid_action', 'bluff_caught', 'reckless_bluff']:
+            self.weights[k] = min(max(self.weights[k], -1.0), -0.001)
 
 class DoubtRoyaleEnv(gym.Env):
     def __init__(self, reward_sys, num_players=4):
@@ -339,22 +343,12 @@ class DoubtRoyaleEnv(gym.Env):
         self._add_reward('step')
         
         # --- [ハイブリッド推考エンジン: Action Override] ---
+        # [Action Override removed to allow AI to learn multiple cards on empty field]
         if self.phase == 'doubting':
             # 確定嘘（論理的100%バレ）の場合は無条件でダウトする (Override)
             if self.field["count"] > 0 and self._is_number_exposed(0, self.field["number"], self.field["count"]):
                 action = 105
                 self.reward_buffer += 0.5 # 賢い判断のボーナス
-                
-        elif self.phase == 'playing':
-            # プランジェネレーターによる「最もポテンシャルの高い手順」の推考
-            plan = PlanGenerator.generate_plan(self.hands[0], self.is_revolution, self.is_eleven_back)
-            if plan and len(plan) > 0:
-                best_group = plan[0] # 最も優先度の高いカードセット
-                best_num = 0 if best_group[0]["is_joker"] else best_group[0]["number"]
-                
-                # 自分が出すべき手順がある時、場が空ならプラン通りに強制プレイ
-                if self.field["count"] == 0:
-                    action = (best_group[0]["suit"] * 13 + (best_num - 1) + 1) if not best_group[0]["is_joker"] else (53 if "1" in best_group[0]["id"] else 54)
         # ---------------------------------------------------
 
         if self.phase == 'playing':
@@ -391,7 +385,7 @@ class DoubtRoyaleEnv(gym.Env):
                         # 強カード(J, 2, A)の無謀なブラフへのペナルティ
                         matching = [c for c in self.hands[0] if (0 if c["is_joker"] else c["number"]) == num]
                         if num in [0, 1, 2] and len(matching) == 0:
-                            self.reward_buffer -= 0.1 # 無謀なブラフへの軽微なペナルティ（正規化済み）
+                            self._add_reward('reckless_bluff')
                         self.bluff_tracker.record_bluff_attempt(num)
                         if cnt > 1:
                             self.reward_buffer += self.reward_sys.get_reward('multi_play_bonus') * cnt
@@ -457,6 +451,7 @@ class DoubtRoyaleEnv(gym.Env):
             self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
             self.pass_count = 0
             self.is_eleven_back = False
+            if p_idx == 0: self._add_reward('field_clear')
         else:
             self.pass_count += 1
             # 全アクティブプレイヤーがパスしたら場を流す
@@ -481,8 +476,13 @@ class DoubtRoyaleEnv(gym.Env):
             
         if not lie:
             matching = [c for c in self.hands[p_idx] if (0 if c["is_joker"] else c["number"]) == num]
-            if len(matching) < cnt: return False
-            cards = matching[:cnt]
+            if len(matching) < cnt:
+                # ジョーカーをワイルドカードとして補充
+                jokers = [c for c in self.hands[p_idx] if c["is_joker"]]
+                if len(matching) + len(jokers) < cnt: return False
+                cards = matching + jokers[:(cnt - len(matching))]
+            else:
+                cards = matching[:cnt]
         else:
             rev = self.is_revolution != self.is_eleven_back
             def sort_key(c):
@@ -501,10 +501,16 @@ class DoubtRoyaleEnv(gym.Env):
         self.hands[p_idx] = [c for c in self.hands[p_idx] if c["id"] not in [cp["id"] for cp in cards]]
         self.field.update({"number": num, "count": len(cards), "last_player": p_idx, "cards": cards})
         self.pass_count = 0  # カードが出たらパスカウントリセット
-        
+                
+        # プレイ直後の上がり禁止チェック報酬
+        if p_idx == 0 and len(self.hands[p_idx]) == 0:
+            forbidden = [8, 0, 2, 3 if self.is_revolution else -1]
+            if num in forbidden:
+                self._add_reward('forbidden_finish')
+
         new_rev = self.is_revolution
         if len(cards) >= 4: new_rev = not self.is_revolution
-        
+
         # プレイ後のポテンシャル評価
         pot_after = self._get_hand_potential(p_idx, new_rev, self.is_eleven_back)
         
@@ -654,6 +660,7 @@ class DoubtRoyaleEnv(gym.Env):
         
         # 8切りまたはカウンター成功時は場を流す
         if num == 8 or getattr(self, "countered", False):
+            if self.turn_player == 0: self._add_reward('field_clear')
             self.field = {"number": 0, "count": 0, "last_player": -1, "cards": []}
             if self.player_out[self.turn_player]:
                 self.turn_player = self._next_player(self.turn_player)
@@ -1107,6 +1114,7 @@ def train():
             agent.rewards.append(reward); agent.dones.append(done)
             ep_reward += reward
         
+        last_r = ep_reward
         total_ep_reward += ep_reward
         agent.update()
         
@@ -1123,9 +1131,8 @@ def train():
             print("") # 改行
             wr = sum(reward_sys.recent_wins) / len(reward_sys.recent_wins) if reward_sys.recent_wins else 0
             tr = sum(reward_sys.recent_timeouts) / len(reward_sys.recent_timeouts) if reward_sys.recent_timeouts else 0
-            avg_r = total_ep_reward / 100
             bluff_info = bluff_pass_tracker.get_summary()
-            print(f"EP {ep} | WinRate: {wr:.2%} | Timeouts: {tr:.1%} | AvgR: {avg_r:.2f} | {bluff_info} | Time: {int(time.time()-start_time)}s")
+            print(f"EP {ep} | WinRate: {wr:.2%} | Timeouts: {tr:.1%} | LastR: {last_r:.2f} | {bluff_info} | Time: {int(time.time()-start_time)}s")
             total_ep_reward = 0
             
             # ディレクトリの存在を最終確認 (Colab 接続切れ対策)
