@@ -214,12 +214,12 @@ class DynamicRewardSystem:
             self.weights['field_clear'] = max(self.weights['field_clear'] - 0.01, 0.05)
             self.weights['multi_play_bonus'] = max(self.weights['multi_play_bonus'] - 0.005, 0.005)
 
-        # タイムアウト率ベースの調整 (遅延行為のペナルティ強化)
+        # タイムアウト率ベースの調整 (遅延行為のペナルティ強化・厳格化)
         timeout_rate = sum(self.recent_timeouts) / max(len(self.recent_timeouts), 1)
-        if timeout_rate > 0.4:
-            self.weights['step'] = max(self.weights['step'] - 0.002, -0.01)
-            self.weights['pass'] = max(self.weights['pass'] - 0.002, -0.02)
-        else:
+        if timeout_rate > 0.10: # 40% -> 10%で発動するように厳格化し80回制限内で上がるよう促す
+            self.weights['step'] = max(self.weights['step'] - 0.005, -0.02)
+            self.weights['pass'] = max(self.weights['pass'] - 0.005, -0.05)
+        elif timeout_rate < 0.05:
             self.weights['step'] = min(self.weights['step'] + 0.001, -0.002)
             self.weights['pass'] = min(self.weights['pass'] + 0.002, -0.002)
             
@@ -419,7 +419,11 @@ class DoubtRoyaleEnv(gym.Env):
                 if self.is_timeout:
                     self._add_reward('lose')  # タイムアウトは敗北報酬
                 else:
-                    self._add_reward('win' if is_win else 'lose')
+                    if is_win:
+                        speed_bonus = max(0, 80 - self.ai_action_count) * 0.05
+                        self.reward_buffer += self.reward_sys.get_reward('win') + speed_bonus
+                    else:
+                        self._add_reward('lose')
             return self._get_flat_obs(0), self.reward_buffer, done, False, {}
 
         # プレイヤー0のターン
@@ -507,7 +511,11 @@ class DoubtRoyaleEnv(gym.Env):
             if self.is_timeout:
                 self._add_reward('lose')  # タイムアウト/スタールは敗北報酬
             else:
-                self._add_reward('win' if is_win else 'lose')
+                if is_win:
+                    speed_bonus = max(0, 80 - self.ai_action_count) * 0.05
+                    self.reward_buffer += self.reward_sys.get_reward('win') + speed_bonus
+                else:
+                    self._add_reward('lose')
         
         # 1ステップあたりの総報酬を強制クリップ（無限ループ稼ぎなどによる発散防止）
         self.reward_buffer = min(max(self.reward_buffer, -1.0), 1.0)
