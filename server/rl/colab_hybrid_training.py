@@ -276,6 +276,7 @@ class DoubtRoyaleEnv(gym.Env):
         self.num_players = num_players
         self.reward_sys = reward_sys
         self.opponent_policies = None
+        self._warned_invalid_opponent_policy = False
         self.device = DEVICE
         self.bluff_tracker = bluff_pass_tracker
         
@@ -1174,10 +1175,25 @@ class DoubtRoyaleEnv(gym.Env):
                     with torch.no_grad():
                         obs_t = torch.FloatTensor(self._get_flat_obs(p)).unsqueeze(0).to(self.device)
                         probs, _ = self.opponent_policies[p](obs_t)
-                        mask_t = torch.FloatTensor(self.get_action_mask(p)).unsqueeze(0).to(self.device)
-                        probs = probs * mask_t
-                        probs = probs / probs.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-                        a = Categorical(probs).sample().item()
+                        legal_mask = self.get_action_mask(p)
+                        mask_t = torch.as_tensor(legal_mask, dtype=torch.float32, device=self.device).unsqueeze(0)
+                        masked_probs = probs * mask_t
+                        totals = masked_probs.sum(dim=-1, keepdim=True)
+                        valid_distribution = (
+                            torch.isfinite(masked_probs).all().item()
+                            and torch.isfinite(totals).all().item()
+                            and (masked_probs >= 0).all().item()
+                            and (totals > 0).all().item()
+                        )
+                        if valid_distribution:
+                            probs = masked_probs / totals
+                            a = Categorical(probs=probs).sample().item()
+                        else:
+                            legal_actions = np.flatnonzero(legal_mask > 0)
+                            a = int(random.choice(legal_actions.tolist())) if len(legal_actions) else 0
+                            if not self._warned_invalid_opponent_policy:
+                                print("⚠️ Opponent policy returned invalid probabilities; used a random legal action.")
+                                self._warned_invalid_opponent_policy = True
             else:
                 if self.phase == 'playing': a = -1
                 elif self.phase == 'doubting': a = random.choice([0, 0, 105])  # 33%の確率でダウト
@@ -1314,9 +1330,10 @@ class DeepNashAgent:
     def __init__(self, obs_dim, action_dim, lr=3e-4):
         self.device = DEVICE
         self.policy = ActorCriticNet(obs_dim, action_dim).to(self.device)
-        self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
+        self.optimizer = optim.Adam(self.policy.parameters(), lr=lr, eps=1e-5)
         self.ref_policy = ActorCriticNet(obs_dim, action_dim).to(self.device)
         self.ref_policy.load_state_dict(self.policy.state_dict())
+        self.ref_policy.eval()
         self.kl_coeff = 0.01
         self.gamma = 0.99
         self.gae_lambda = 0.95
@@ -1328,18 +1345,71 @@ class DeepNashAgent:
         self.states, self.actions, self.masks = [], [], []
         self.logprobs, self.values, self.rewards, self.dones = [], [], [], []
 
+    def _clear_rollout(self):
+        self.states, self.actions, self.masks = [], [], []
+        self.logprobs, self.values, self.rewards, self.dones = [], [], [], []
+
+    def _optimizer_state_is_finite(self):
+        return all(
+            torch.isfinite(value).all().item()
+            for state in self.optimizer.state.values()
+            for value in state.values()
+            if torch.is_tensor(value) and value.is_floating_point()
+        )
+
+    def _rollback_update(self, policy_backup, reason):
+        self.policy.load_state_dict(policy_backup)
+        self.optimizer.state.clear()
+        for group in self.optimizer.param_groups:
+            group['lr'] = max(group['lr'] * 0.5, 1e-5)
+            group['eps'] = 1e-5
+        self._clear_rollout()
+        print(f"⚠️ Non-finite PPO update skipped ({reason}); restored weights and reduced learning rate.")
+
+    def _restore_reference_policy(self, reason):
+        reference_is_finite = all(
+            torch.isfinite(parameter).all().item()
+            for parameter in self.ref_policy.parameters()
+        )
+        if not reference_is_finite:
+            raise RuntimeError("Both the current policy and reference policy contain non-finite values.")
+        self.policy.load_state_dict(self.ref_policy.state_dict())
+        self.optimizer.state.clear()
+        for group in self.optimizer.param_groups:
+            group['lr'] = max(group['lr'] * 0.5, 1e-5)
+            group['eps'] = 1e-5
+        self._clear_rollout()
+        print(f"⚠️ Restored reference policy after {reason}; reduced learning rate.")
+
     @staticmethod
     def apply_action_mask(probs, masks):
-        masked = probs * masks
+        safe_probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
+        safe_masks = torch.nan_to_num(masks, nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
+        masked = safe_probs * safe_masks
         totals = masked.sum(dim=-1, keepdim=True)
-        fallback = masks / masks.sum(dim=-1, keepdim=True).clamp(min=1.0)
-        return torch.where(totals > 0, masked / totals.clamp(min=1e-8), fallback)
+        mask_totals = safe_masks.sum(dim=-1, keepdim=True)
+        fallback = safe_masks / mask_totals.clamp(min=1.0)
+        no_legal_action = mask_totals <= 0
+        pass_fallback = torch.zeros_like(safe_masks)
+        pass_fallback[..., 0] = 1.0
+        fallback = torch.where(no_legal_action, pass_fallback, fallback)
+        valid_totals = torch.isfinite(totals) & (totals > 0)
+        return torch.where(valid_totals, masked / totals.clamp(min=1e-8), fallback)
 
     def select_action(self, state, action_mask):
         state_t = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         mask_t = torch.FloatTensor(action_mask).unsqueeze(0).to(self.device)
+        if not torch.isfinite(state_t).all():
+            raise ValueError("Observation contains non-finite values.")
         with torch.no_grad(): probs, val = self.policy(state_t)
+        if not torch.isfinite(probs).all() or not torch.isfinite(val).all():
+            self._restore_reference_policy("non-finite policy output")
+            with torch.no_grad(): probs, val = self.policy(state_t)
+        if not torch.isfinite(probs).all() or not torch.isfinite(val).all():
+            raise RuntimeError("Policy still produces non-finite outputs after recovery.")
         probs = self.apply_action_mask(probs, mask_t)
+        if not torch.isfinite(probs).all():
+            raise RuntimeError("Masked action probabilities contain non-finite values.")
         dist = Categorical(probs); action = dist.sample()
         self.states.append(state_t)
         self.actions.append(action)
@@ -1350,6 +1420,10 @@ class DeepNashAgent:
 
     def update(self):
         if not self.states: return
+        policy_backup = {
+            name: tensor.detach().clone()
+            for name, tensor in self.policy.state_dict().items()
+        }
         states = torch.cat(self.states)
         actions = torch.cat(self.actions).view(-1)
         masks = torch.cat(self.masks)
@@ -1357,6 +1431,12 @@ class DeepNashAgent:
         rewards = torch.as_tensor(self.rewards, dtype=torch.float32, device=self.device)
         dones = torch.as_tensor(self.dones, dtype=torch.float32, device=self.device)
         values = torch.cat(self.values).view(-1)
+
+        if not all(torch.isfinite(tensor).all().item() for tensor in (
+            states, old_logprobs, rewards, dones, values
+        )):
+            self._rollback_update(policy_backup, "non-finite rollout data")
+            return
 
         # GAE uses the next recorded decision value; terminal episodes bootstrap
         # from zero. The training loop updates only after a complete episode.
@@ -1369,14 +1449,24 @@ class DeepNashAgent:
             advantages[t] = gae
         returns = advantages + values
         advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
+        if not torch.isfinite(advantages).all() or not torch.isfinite(returns).all():
+            self._rollback_update(policy_backup, "non-finite advantages or returns")
+            return
 
         batch_size = len(actions)
         for _ in range(self.update_epochs):
             permutation = torch.randperm(batch_size, device=self.device)
             for start in range(0, batch_size, self.minibatch_size):
                 indices = permutation[start:start + self.minibatch_size]
-                probs, predicted_values = self.policy(states[indices])
+                raw_probs, predicted_values = self.policy(states[indices])
+                if not torch.isfinite(raw_probs).all() or not torch.isfinite(predicted_values).all():
+                    self._rollback_update(policy_backup, "non-finite network output")
+                    return
+                probs = raw_probs
                 probs = self.apply_action_mask(probs, masks[indices])
+                if not torch.isfinite(probs).all() or not torch.isfinite(predicted_values).all():
+                    self._rollback_update(policy_backup, "non-finite network output")
+                    return
                 dist = Categorical(probs)
                 logprobs = dist.log_prob(actions[indices])
                 entropy = dist.entropy().mean()
@@ -1402,13 +1492,21 @@ class DeepNashAgent:
                     + self.kl_coeff * kl
                     - self.entropy_coef * entropy
                 )
+                if not torch.isfinite(loss):
+                    self._rollback_update(policy_backup, "non-finite loss")
+                    return
                 self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
+                grad_norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
+                if not torch.isfinite(grad_norm):
+                    self._rollback_update(policy_backup, "non-finite gradients")
+                    return
                 self.optimizer.step()
+                if not all(torch.isfinite(parameter).all().item() for parameter in self.policy.parameters()):
+                    self._rollback_update(policy_backup, "non-finite model parameters")
+                    return
 
-        self.states, self.actions, self.masks = [], [], []
-        self.logprobs, self.values, self.rewards, self.dones = [], [], [], []
+        self._clear_rollout()
 
 
 def evaluate_policy(policy, episodes=EVAL_EPISODES, base_seed=EVAL_BASE_SEED):
@@ -1469,6 +1567,17 @@ def evaluate_policy(policy, episodes=EVAL_EPISODES, base_seed=EVAL_BASE_SEED):
         "episodes": episodes,
     }
 
+
+def export_policy_onnx(policy, path):
+    """Export in inference mode and restore the policy's previous mode."""
+    was_training = policy.training
+    policy.eval()
+    try:
+        dummy_input = torch.randn(1, 114, device=DEVICE)
+        torch.onnx.export(policy, dummy_input, path)
+    finally:
+        policy.train(was_training)
+
 def train():
     reward_sys = DynamicRewardSystem()
     env = DoubtRoyaleEnv(reward_sys)
@@ -1493,8 +1602,17 @@ def train():
             else:
                 # 過去バージョン互換
                 agent.policy.load_state_dict(checkpoint)
+
+            if not all(torch.isfinite(parameter).all().item() for parameter in agent.policy.parameters()):
+                raise ValueError("Checkpoint contains non-finite policy parameters.")
+            if not agent._optimizer_state_is_finite():
+                agent.optimizer.state.clear()
+                print("⚠️ Optimizer state contained non-finite values; reset Adam moments.")
+            for group in agent.optimizer.param_groups:
+                group['eps'] = max(float(group.get('eps', 1e-8)), 1e-5)
             
             agent.ref_policy.load_state_dict(agent.policy.state_dict())
+            agent.ref_policy.eval()
             print(f"✅ チェックポイント復元: {ckpt} (エピソード {start_ep} から再開)")
         except:
             print(f"⚠️ ネットワーク構成変更またはファイル破損のため、新規学習からスタートします。")
@@ -1593,9 +1711,8 @@ def train():
                         'eval_win_rate': eval_metrics['win_rate'],
                         'best_eval_win_rate': best_eval_win_rate,
                     }, best_ckpt)
-                    torch.onnx.export(
+                    export_policy_onnx(
                         agent.policy,
-                        torch.randn(1, 114).to(DEVICE),
                         os.path.join(SAVE_DIR, "doubt_royale_best.onnx"),
                     )
                     print(f"🏆 Best evaluated model saved: {best_ckpt}")
@@ -1616,9 +1733,12 @@ def train():
 
             # 1000エピソードごとに最新のONNXを出力
             latest_onnx = os.path.join(SAVE_DIR, "doubt_royale_latest.onnx")
-            torch.onnx.export(agent.policy, torch.randn(1, 114).to(DEVICE), latest_onnx)
+            export_policy_onnx(agent.policy, latest_onnx)
             # 履歴用にも保存
-            torch.onnx.export(agent.policy, torch.randn(1, 114).to(DEVICE), os.path.join(SAVE_DIR, f"doubt_royale_v15_ep{ep}.onnx"))
+            export_policy_onnx(
+                agent.policy,
+                os.path.join(SAVE_DIR, f"doubt_royale_v15_ep{ep}.onnx"),
+            )
             
             agent.ref_policy.load_state_dict(agent.policy.state_dict())
             new_opp = ActorCriticNet(114, 176).to(DEVICE)
