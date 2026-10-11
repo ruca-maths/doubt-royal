@@ -32,6 +32,7 @@ export class DoubtManager {
 
     // Can't doubt if already declared
     if (room.doubtDeclarers.includes(playerId)) return false;
+    if (room.doubtSkippers.includes(playerId)) return false;
 
     // Can't doubt if out
     const player = room.players.find(p => p.id === playerId);
@@ -46,6 +47,7 @@ export class DoubtManager {
    */
   static registerSkip(room: Room, playerId: string): boolean {
     if (playerId === room.field.lastPlayerId) return false;
+    if (room.doubtDeclarers.includes(playerId)) return false;
 
     const player = room.players.find(p => p.id === playerId);
     if (!player || player.isOut || player.lives <= 0) return false;
@@ -54,10 +56,11 @@ export class DoubtManager {
       room.doubtSkippers.push(playerId);
     }
 
-    const eligiblePlayersCount = room.players.filter(p => !p.isOut && p.id !== room.field.lastPlayerId).length;
+    const eligiblePlayersCount = room.players.filter(p => !p.isOut && p.lives > 0 && p.id !== room.field.lastPlayerId).length;
     
     // If everyone who can doubt or skip has done so, return true to resolve early
-    if (room.doubtSkippers.length + room.doubtDeclarers.length >= eligiblePlayersCount) {
+    const resolvedPlayerCount = new Set([...room.doubtSkippers, ...room.doubtDeclarers]).size;
+    if (resolvedPlayerCount >= eligiblePlayersCount) {
       return true;
     }
 

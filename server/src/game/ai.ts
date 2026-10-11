@@ -1,7 +1,7 @@
 import { Room, Player, Card } from './types';
 import { GameEngine } from './engine';
 import { DoubtManager } from './doubt';
-import { validatePlayCards } from './validator';
+import { getCardStrength, validatePlayCards } from './validator';
 import { StrategyEngine } from './strategy';
 import * as ort from 'onnxruntime-node';
 import path from 'path';
@@ -31,9 +31,21 @@ export class AIEngine {
 
   private static getModelPath(): string {
     const cwd = process.cwd();
+    const configuredModel = process.env.DOUBT_ROYALE_MODEL;
+    if (configuredModel) {
+      const configuredPath = path.isAbsolute(configuredModel)
+        ? configuredModel
+        : path.resolve(cwd, configuredModel);
+      if (require('fs').existsSync(configuredPath)) {
+        console.log(`AI Engine: Using configured model at ${configuredPath}`);
+        return configuredPath;
+      }
+      console.warn(`AI Engine: Configured model not found at ${configuredPath}; falling back to default model search.`);
+    }
+
     const modelNames = [
-      'doubt_royale_v15_ep267000.onnx',
       'doubt_royale_latest.onnx',
+      'doubt_royale_v15_ep267000.onnx',
       'doubt_royale_v15_ep91000.onnx',
       'doubt_royale_v15_ep27000.onnx',
       'doubt_royale_v15_ep19000.onnx',
@@ -123,7 +135,7 @@ export class AIEngine {
 
         if (session) {
           try {
-            const result = await this.predict(session, stateVector);
+            const result = await this.predict(session, stateVector, this.getAllowedModelActions(room, player));
             action = this.mapActionToGame(room, player, result);
             
             if (action.type === 'play') {
@@ -231,12 +243,15 @@ export class AIEngine {
       case 'playing': return 0;
       case 'doubtPhase': return 1;
       case 'counterPhase': return 2;
+      case 'q_bomb': return 3;
       case 'effectPhase': return 4;
+      case 'card_sel': return 4;
+      case 'six_absorb': return 5;
       default: return 0;
     }
   }
 
-  private static async predict(session: ort.InferenceSession, state: number[]): Promise<number> {
+  private static async predict(session: ort.InferenceSession, state: number[], allowedActions?: number[]): Promise<number> {
     const input = new ort.Tensor('float32', new Float32Array(state), [1, 114]);
     const results = await session.run({ input });
     let outputData: Float32Array;
@@ -248,9 +263,15 @@ export class AIEngine {
       const firstKey = Object.keys(results)[0];
       outputData = results[firstKey].data as Float32Array;
     }
-    let maxIdx = 0;
-    for (let i = 1; i < outputData.length; i++) {
-        if (outputData[i] > outputData[maxIdx]) maxIdx = i;
+    const candidates = allowedActions
+      ? allowedActions.filter(action => Number.isInteger(action) && action >= 0 && action < outputData.length)
+      : Array.from({ length: outputData.length }, (_, action) => action);
+    if (candidates.length === 0) {
+      throw new Error('No legal model actions are available for this game state.');
+    }
+    let maxIdx = candidates[0];
+    for (const action of candidates.slice(1)) {
+      if (outputData[action] > outputData[maxIdx]) maxIdx = action;
     }
     return maxIdx;
   }
@@ -403,25 +424,31 @@ export class AIEngine {
     }
 
     const fieldCardsCount = room.field.currentCards.length;
-    // 場に出ている枚数があれば、その枚数に合わせる必要がある
-    const targetCount = fieldCardsCount > 0 ? fieldCardsCount : computedTargetCount;
+    // The training action encodes both the declared rank and card count.
+    // Keep that count valid on the field as well as on an empty lead.
+    if (fieldCardsCount > 0 && computedTargetCount !== fieldCardsCount) return { type: 'pass' };
+    const targetCount = computedTargetCount;
 
-    const matchingCards = player.hand.filter(c => (c.isJoker ? 0 : c.number) === declaredNum);
-    
-    // AI Behavior Improvement: Force multiple cards play if honestly leading
+    let selectedCards: Card[] = [];
     if (!isLie) {
-        if (room.field.currentCards.length === 0) {
-            // When leading with honest cards, always play ALL matching cards to reduce hand size efficiently
-            return { type: 'play', cards: matchingCards, declaredNumber: declaredNum };
-        } else if (matchingCards.length >= targetCount) {
-            return { type: 'play', cards: matchingCards.slice(0, targetCount), declaredNumber: declaredNum };
-        }
+      const matchingCards = player.hand.filter(c => !c.isJoker && c.number === declaredNum);
+      const jokers = player.hand.filter(c => c.isJoker);
+      if (matchingCards.length >= targetCount) {
+        selectedCards = matchingCards.slice(0, targetCount);
+      } else if (matchingCards.length + jokers.length >= targetCount) {
+        selectedCards = [...matchingCards, ...jokers.slice(0, targetCount - matchingCards.length)];
+      }
     } else {
-        const otherCards = player.hand.filter(c => (c.isJoker ? 0 : c.number) !== declaredNum);
-        const available = otherCards.length >= targetCount ? otherCards : player.hand;
-        if (available.length >= targetCount) {
-            return { type: 'play', cards: available.slice(0, targetCount), declaredNumber: declaredNum };
-        }
+      const byStrength = (a: Card, b: Card) =>
+        getCardStrength(a.isJoker ? 0 : a.number, room.rules) - getCardStrength(b.isJoker ? 0 : b.number, room.rules);
+      const otherCards = player.hand
+        .filter(c => (c.isJoker ? 0 : c.number) !== declaredNum)
+        .sort(byStrength);
+      const available = otherCards.length >= targetCount ? otherCards : [...player.hand].sort(byStrength);
+      if (available.length >= targetCount) selectedCards = available.slice(0, targetCount);
+    }
+    if (selectedCards.length === targetCount) {
+      return { type: 'play', cards: selectedCards, declaredNumber: declaredNum };
     }
     return { type: 'pass' };
   }
@@ -438,7 +465,7 @@ export class AIEngine {
     return (faceUpCount + myCount >= maxCards) && myCount === 0;
   }
 
-  private static getStateVector(room: Room, player: Player): number[] {
+  private static getStateVector(room: Room, player: Player, phaseOverride?: string): number[] {
     const vec = new Array(114).fill(0);
     player.hand.forEach(c => {
         let idx = -1;
@@ -446,33 +473,110 @@ export class AIEngine {
         if (cardMatch) idx = parseInt(cardMatch[1]);
         if (idx >= 0 && idx < 54) vec[idx] = 1;
     });
-    vec[54] = room.field.declaredNumber;
-    vec[55] = room.field.currentCards.length;
+    vec[54] = room.field.declaredNumber / 13;
+    vec[55] = room.field.currentCards.length / 4;
     if (room.field.lastPlayerId) {
         const lastIdx = room.turnOrder.indexOf(room.field.lastPlayerId);
-        const myIdx = room.turnOrder.indexOf(player.id);
-        vec[56] = (lastIdx - myIdx + room.players.length) % room.players.length;
+        vec[56] = (lastIdx + 1) / 4;
     } else {
-        vec[56] = -1;
+        vec[56] = 0;
     }
     let j = 0;
     room.players.forEach(p => {
-        if (p.id !== player.id) {
-            vec[57 + j] = p.hand.length;
+        if (p.id !== player.id && j < 3) {
+            vec[57 + j] = p.hand.length / 54;
             j++;
         }
     });
     vec[60] = room.rules.isRevolution ? 1 : 0;
     vec[61] = room.rules.isElevenBack ? 1 : 0;
-    vec[62] = this.getPhaseIndex(room.phase);
+    vec[62] = this.getPhaseIndex(phaseOverride || room.phase) / 5;
 
     // faceUpPool information (14 dimensions: idx 63-76)
     room.field.faceUpPool.forEach(c => {
         const num = c.isJoker ? 0 : c.number;
-        vec[63 + num] += 1;
+        vec[63 + num] += 0.25;
     });
 
+    const reversed = room.rules.isRevolution !== room.rules.isElevenBack;
+    vec[77] = player.hand.length === 0
+      ? 1
+      : player.hand.reduce((sum, card) => {
+          if (card.isJoker) return sum + 14;
+          const value = card.number < 3 ? card.number - 3 + 13 : card.number - 3;
+          return sum + (reversed ? 13 - value : value);
+        }, 0) / (player.hand.length * 14);
+
+    const declared = room.field.declaredNumber;
+    if (declared > 0) {
+      const maxCopies = 4;
+      const visible = room.field.faceUpPool.filter(c => !c.isJoker && c.number === declared).length;
+      const held = player.hand.filter(c => !c.isJoker && c.number === declared).length;
+      vec[78] = visible + held + room.field.currentCards.length > maxCopies ? 1 : 0;
+    }
+
+    const handCounts = new Array(14).fill(0);
+    player.hand.forEach(card => { handCounts[card.isJoker ? 0 : card.number] += 1; });
+    for (let n = 0; n < 14; n++) vec[82 + n] = handCounts[n] / 4;
+    vec[96] = room.rules.direction === -1 ? 1 : 0;
+
     return vec;
+  }
+
+  private static getAllowedModelActions(room: Room, player: Player, effectType?: string): number[] {
+    if (room.phase === 'playing') {
+      const allowed: number[] = [];
+      const fieldIsActive = room.field.currentCards.length > 0 && room.field.lastPlayerId !== player.id;
+      if (fieldIsActive) allowed.push(0);
+
+      for (let action = 1; action <= 104; action++) {
+        const mapped = this.mapActionToGame(room, player, action);
+        if (mapped.type !== 'play' || !mapped.cards || mapped.cards.length === 0) continue;
+        const validation = validatePlayCards(
+          mapped.cards,
+          mapped.declaredNumber!,
+          {
+            currentCardCount: room.field.currentCards.length,
+            declaredNumber: room.field.declaredNumber,
+            lastPlayerId: room.field.lastPlayerId,
+          },
+          room.rules
+        );
+        if (validation.valid) allowed.push(action);
+      }
+      return allowed;
+    }
+
+    if (room.phase === 'doubtPhase') return [0, 105];
+
+    if (room.phase === 'counterPhase') {
+      const allowed = [0];
+      if (room.field.declaredNumber === 8) {
+        const requiredCount = room.field.currentCards.length + 1;
+        const fours = player.hand.filter(card => !card.isJoker && card.number === 4).length;
+        if (fours >= requiredCount) allowed.push(106);
+      } else if (room.field.declaredNumber === 0 && room.field.currentCards.length === 1) {
+        if (player.hand.some(card => card.suit === 'spade' && card.number === 3 && !card.isJoker)) allowed.push(107);
+      }
+      return allowed;
+    }
+
+    if (room.phase === 'effectPhase') {
+      if (effectType === 'queenBomber') return Array.from({ length: 14 }, (_, index) => 108 + index);
+      if (effectType === 'sixCollect') {
+        const allowed = Array.from({ length: Math.min(room.field.faceUpPool.length, 54) }, (_, index) => 122 + index);
+        if (room.field.faceUpPool.length < 54) allowed.push(175);
+        return allowed.length > 0 ? allowed : [175];
+      }
+      if (effectType === 'sevenPass' || effectType === 'tenDiscard') {
+        const count = Math.min(player.hand.length, 54);
+        const allowed = count > 0 ? Array.from({ length: count }, (_, index) => 122 + index) : [];
+        if (count < 54) allowed.push(175);
+        return allowed;
+      }
+    }
+
+    return [0];
   }
 
   static async runDoubtDecision(room: Room, onDoubtDeclared: (playerId: string) => void, onDoubtResolved: () => void): Promise<void> {
@@ -523,7 +627,7 @@ export class AIEngine {
               }
             } else if (session) {
               try {
-                const action = await this.predict(session, stateVector);
+                const action = await this.predict(session, stateVector, [0, 105]);
                 willDoubt = (action === 105);
               } catch (e) {
                 willDoubt = Math.random() < 0.1;
@@ -571,7 +675,7 @@ export class AIEngine {
         let counterAction = 0;
         if (session) {
           try {
-            counterAction = await this.predict(session, stateVector);
+            counterAction = await this.predict(session, stateVector, this.getAllowedModelActions(room, player));
             willCounter = (counterAction === 106 || counterAction === 107);
           } catch (e) {}
         }
@@ -698,9 +802,16 @@ export class AIEngine {
         const cardIds: string[] = [];
         let targetData: { numbers?: number[] } | undefined;
         let modelAction = -1;
-        if (session) {
-            const stateVector = this.getStateVector(room, player);
-            try { modelAction = await this.predict(session, stateVector); } catch (e) {}
+        const modelPhase = effect.type === 'queenBomber'
+          ? 'q_bomb'
+          : effect.type === 'sixCollect'
+            ? 'six_absorb'
+            : 'card_sel';
+        if (session && effect.type !== 'doubtCardSelect' && effect.type !== 'queenBomber') {
+            const stateVector = this.getStateVector(room, player, modelPhase);
+            try {
+              modelAction = await this.predict(session, stateVector, this.getAllowedModelActions(room, player, effect.type));
+            } catch (e) {}
         }
         switch (effect.type) {
           case 'sevenPass':
@@ -709,34 +820,32 @@ export class AIEngine {
             const count = Math.min(effect.count, player.hand.length);
             if (count > 0) {
               if (modelAction >= 122 && modelAction <= 175) {
-                const cardIdx = Math.min(modelAction - 122, player.hand.length - 1);
-                cardIds.push(player.hand[cardIdx].id);
-              } else {
+                if (!(modelAction === 175 && player.hand.length < 54)) {
+                  const cardIdx = Math.min(modelAction - 122, player.hand.length - 1);
+                  cardIds.push(player.hand[cardIdx].id);
+                }
+              }
+              const modelPassed = modelAction === 175 && player.hand.length < 54;
+              if (!modelPassed) {
                 const sortedHand = [...player.hand].sort((a, b) => {
-                  // Strategic card valuation (Higher value = Keep longer)
                   const getStrength = (c: Card) => {
-                      if (c.isJoker) return 100;
-                      if (c.suit === 'spade' && c.number === 3) return 90; // Protect Spade 3 (Counter for Joker)
-                      if (c.number === 2) return 80;
-                      if (c.number === 1) return 70;
-                      if (c.number === 8 || c.number === 11) return 60;
-                      return c.number; // Higher card number is usually safer
+                    if (c.isJoker) return 100;
+                    if (c.suit === 'spade' && c.number === 3) return 90;
+                    if (c.number === 2) return 80;
+                    if (c.number === 1) return 70;
+                    if (c.number === 8 || c.number === 11) return 60;
+                    return c.number;
                   };
-                  
-                  const strengthA = getStrength(a);
-                  const strengthB = getStrength(b);
-                  
-                  if (room.rules.isRevolution) {
-                      // In revolution, smaller numbers (excluding special cards) are stronger
-                      // but special cards (Joker, Spade 3) keep high priority
-                      return strengthA - strengthB; 
-                  }
-                  return strengthA - strengthB;
+                  return getStrength(a) - getStrength(b);
                 });
                 const excludedNumbers = (effect as any).excludedNumbers as number[] | undefined;
-                let availableCards = sortedHand;
-                if (excludedNumbers) availableCards = availableCards.filter(c => !excludedNumbers.includes(c.number) && !(excludedNumbers.includes(0) && c.isJoker));
-                for (let i = 0; i < Math.min(count, availableCards.length); i++) cardIds.push(availableCards[i].id);
+                const availableCards = excludedNumbers
+                  ? sortedHand.filter(c => !excludedNumbers.includes(c.number) && !(excludedNumbers.includes(0) && c.isJoker))
+                  : sortedHand;
+                for (const card of availableCards) {
+                  if (cardIds.length >= count) break;
+                  if (!cardIds.includes(card.id)) cardIds.push(card.id);
+                }
               }
             }
             break;
@@ -744,6 +853,10 @@ export class AIEngine {
           case 'sixCollect': {
             const count = Math.min(effect.count, room.field.faceUpPool.length);
             if (count > 0) {
+              if (modelAction >= 122 && modelAction <= 175 && modelAction - 122 < room.field.faceUpPool.length) {
+                cardIds.push(room.field.faceUpPool[modelAction - 122].id);
+              }
+              const modelPassed = modelAction === 175 && room.field.faceUpPool.length < 54;
               const sortedPool = [...room.field.faceUpPool].sort((a, b) => {
                 let rankA = (a.number === 2) ? 15 : (a.number === 1 ? 14 : (a.isJoker ? 16 : a.number));
                 let rankB = (b.number === 2) ? 15 : (b.number === 1 ? 14 : (b.isJoker ? 16 : b.number));
@@ -755,9 +868,9 @@ export class AIEngine {
               });
               
               // Only pick decent cards (rank logic: 8 or above in normal strength)
-              const threshold = room.rules.isRevolution ? -8 : 8; // Adjust threshold based on revolution
               for (let i = 0; i < count; i++) {
                 const c = sortedPool[i];
+                if (cardIds.includes(c.id)) continue;
                 let rank = (c.number === 2) ? 15 : (c.number === 1 ? 14 : (c.isJoker ? 16 : c.number));
                 if (room.rules.isRevolution) {
                   rank = (c.number === 2) ? -15 : (c.number === 1 ? -14 : (c.isJoker ? 16 : -c.number));
@@ -766,7 +879,7 @@ export class AIEngine {
                 // If it's a weak card, do not pick it up (unless it's revolution where negatives are stronger but we check rank size)
                 // Simplified decent logic: the cards are already sorted strongest first.
                 // If the strongest available isn't that great, we stop collecting.
-                if ((!room.rules.isRevolution && rank >= 8) || (room.rules.isRevolution && rank >= -8) || c.isJoker) {
+                if (!modelPassed && cardIds.length < count && ((!room.rules.isRevolution && rank >= 8) || (room.rules.isRevolution && rank >= -8) || c.isJoker)) {
                    cardIds.push(c.id);
                 }
               }
@@ -776,22 +889,48 @@ export class AIEngine {
           case 'queenBomber': {
             const numCount = effect.count;
             const targetNumbers: number[] = [];
-            
-            // Generate the primary number to destroy
-            let primaryNum = 0;
-            if (modelAction >= 108 && modelAction <= 121) {
-               primaryNum = modelAction - 107 === 14 ? 0 : modelAction - 107;
-            } else {
-               primaryNum = Math.floor(Math.random() * 13) + 1;
-            }
-            targetNumbers.push(primaryNum);
-            
-            // Randomly select other numbers if we placed multiple Queens
-            const availableChoices = Array.from({ length: 14 }, (_, i) => i).filter(n => n !== primaryNum);
-            while (targetNumbers.length < numCount && availableChoices.length > 0) {
-               const randIdx = Math.floor(Math.random() * availableChoices.length);
-               targetNumbers.push(availableChoices[randIdx]);
-               availableChoices.splice(randIdx, 1);
+
+            // Q-bomb training chooses one distinct rank at a time, with the
+            // observation updated after each simulated removal. Mirror that here.
+            const simulatedRoom = session ? {
+              ...room,
+              players: room.players.map(p => ({ ...p, hand: [...p.hand] })),
+              field: { ...room.field, faceUpPool: [...room.field.faceUpPool] },
+            } as Room : null;
+            const selectedNumbers = new Set<number>();
+            while (targetNumbers.length < numCount && selectedNumbers.size < 14) {
+              let chosenNum: number | undefined;
+              if (session && simulatedRoom) {
+                const simulatedPlayer = simulatedRoom.players.find(p => p.id === player.id);
+                if (simulatedPlayer) {
+                  const allowed = this.getAllowedModelActions(simulatedRoom, simulatedPlayer, effect.type)
+                    .filter(action => !selectedNumbers.has(action === 121 ? 0 : action - 107));
+                  try {
+                    const state = this.getStateVector(simulatedRoom, simulatedPlayer, 'q_bomb');
+                    const action = await this.predict(session, state, allowed);
+                    chosenNum = action === 121 ? 0 : action - 107;
+                  } catch (e) {}
+                }
+              }
+              if (chosenNum === undefined || chosenNum < 0 || chosenNum > 13 || selectedNumbers.has(chosenNum)) {
+                const available = Array.from({ length: 14 }, (_, n) => n).filter(n => !selectedNumbers.has(n));
+                if (available.length === 0) break;
+                chosenNum = available[Math.floor(Math.random() * available.length)];
+              }
+              const targetNum = chosenNum;
+              selectedNumbers.add(targetNum);
+              targetNumbers.push(targetNum);
+
+              if (simulatedRoom) {
+                for (const simulatedPlayer of simulatedRoom.players) {
+                  if (simulatedPlayer.isOut) continue;
+                  const removed = simulatedPlayer.hand.filter(card =>
+                    targetNum === 0 ? card.isJoker : !card.isJoker && card.number === targetNum
+                  );
+                  simulatedPlayer.hand = simulatedPlayer.hand.filter(card => !removed.some(drop => drop.id === card.id));
+                  simulatedRoom.field.faceUpPool.push(...removed);
+                }
+              }
             }
             
             targetData = { numbers: targetNumbers };

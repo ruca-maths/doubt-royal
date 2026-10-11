@@ -82,6 +82,13 @@ export class GameEngine {
       return { success: false, error: '現在は通常のカード出しはできません（カウンターやダウトのフェーズ中です）' };
     }
 
+    if (!Array.isArray(cardIds) || cardIds.length === 0) {
+      return { success: false, error: 'カードを選択してください' };
+    }
+    if (new Set(cardIds).size !== cardIds.length) {
+      return { success: false, error: '同じカードを複数回指定できません' };
+    }
+
     // Find cards in hand
     const cards: Card[] = [];
     for (const cid of cardIds) {
@@ -797,6 +804,9 @@ export class GameEngine {
     const effect = room.pendingEffect;
     if (!effect) return { success: false, error: '保留中の効果がありません' };
     if (effect.playerId !== playerId) return { success: false, error: 'この効果のアクション権限がありません' };
+    if (!Array.isArray(cardIds) || new Set(cardIds).size !== cardIds.length) {
+      return { success: false, error: '同じカードを複数回指定できません' };
+    }
 
     const player = room.players.find(p => p.id === playerId);
     if (!player) return { success: false, error: 'プレイヤーが見つかりません' };
@@ -886,6 +896,12 @@ export class GameEngine {
           return { success: false, error: `最大${effect.count}個まで選択可能です` };
         }
         if (numbers.length === 0) break;
+        if (numbers.some(n => !Number.isInteger(n) || n < 0 || n > 13)) {
+          return { success: false, error: '指定できる数字は1〜13またはジョーカーです' };
+        }
+        if (new Set(numbers).size !== numbers.length) {
+          return { success: false, error: '同じ数字を複数回指定できません' };
+        }
         
         room.field.pendingNumbers = numbers;
         room.pendingEffect = null;

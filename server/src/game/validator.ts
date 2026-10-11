@@ -29,7 +29,7 @@ export function validatePlayCards(
     return { valid: false, reason: '一度に出せるカードは最大6枚です' };
   }
 
-  if (declaredNumber < 0 || declaredNumber > 13) {
+  if (!Number.isInteger(declaredNumber) || declaredNumber < 0 || declaredNumber > 13) {
     return { valid: false, reason: '無効な宣言数字です' };
   }
 
