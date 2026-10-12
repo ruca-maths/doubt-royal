@@ -46,6 +46,10 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 ENABLE_DYNAMIC_REWARD_TUNING = False
 EVAL_EPISODES = 100
 EVAL_BASE_SEED = 20261012
+CHECKPOINT_INTERVAL = 100
+LOG_INTERVAL = 1000
+EVAL_INTERVAL = 1000
+ONNX_EXPORT_INTERVAL = 10000
 
 
 class BluffPassTracker:
@@ -1655,16 +1659,14 @@ def train():
         if ENABLE_DYNAMIC_REWARD_TUNING:
             reward_sys.adjust(ep)
 
-        if ep % 10 == 0:
-            print(".", end="", flush=True) # 10エピソードごとにドットを表示
-
-        if ep % 100 == 0:
-            print("") # 改行
-            wr = sum(reward_sys.recent_wins) / len(reward_sys.recent_wins) if reward_sys.recent_wins else 0
-            tr = sum(reward_sys.recent_timeouts) / len(reward_sys.recent_timeouts) if reward_sys.recent_timeouts else 0
-            bluff_info = bluff_pass_tracker.get_summary()
-            print(f"EP {ep} | WinRate: {wr:.2%} | Timeouts: {tr:.1%} | LastR: {last_r:.2f} | {bluff_info} | Time: {int(time.time()-start_time)}s")
+        if ep % CHECKPOINT_INTERVAL == 0:
             total_ep_reward = 0
+
+            if ep % LOG_INTERVAL == 0:
+                wr = sum(reward_sys.recent_wins) / len(reward_sys.recent_wins) if reward_sys.recent_wins else 0
+                tr = sum(reward_sys.recent_timeouts) / len(reward_sys.recent_timeouts) if reward_sys.recent_timeouts else 0
+                bluff_info = bluff_pass_tracker.get_summary()
+                print(f"EP {ep} | WinRate: {wr:.2%} | Timeouts: {tr:.1%} | LastR: {last_r:.2f} | {bluff_info} | Time: {int(time.time()-start_time)}s")
             
             # ディレクトリの存在を最終確認 (Colab 接続切れ対策)
             if not os.path.exists(SAVE_DIR):
@@ -1680,7 +1682,6 @@ def train():
                     'bluff_tracker_state': bluff_pass_tracker.get_state(),
                     'best_eval_win_rate': best_eval_win_rate,
                 }, ckpt)
-                print(f"💾 チェックポイントを自動保存しました: {ckpt}")
             except Exception as e:
                 # 失敗した場合はカレントディレクトリにフォールバック
                 fallback_ckpt = "./deepnash_policy_latest_fallback.pth"
@@ -1690,7 +1691,7 @@ def train():
                 }, fallback_ckpt)
                 print(f"⚠️ 保存エラーのためローカルにフォールバックしました: {e}")
 
-        if ep % 1000 == 0:
+        if ep % EVAL_INTERVAL == 0:
             eval_metrics = evaluate_policy(agent.policy)
             print(
                 f"\nFixed evaluation vs rule agents: "
@@ -1731,21 +1732,17 @@ def train():
             except Exception as e:
                 print(f"⚠️ Benchmark metadata could not be saved: {e}")
 
-            # 1000エピソードごとに最新のONNXを出力
-            latest_onnx = os.path.join(SAVE_DIR, "doubt_royale_latest.onnx")
-            export_policy_onnx(agent.policy, latest_onnx)
-            # 履歴用にも保存
-            export_policy_onnx(
-                agent.policy,
-                os.path.join(SAVE_DIR, f"doubt_royale_v15_ep{ep}.onnx"),
-            )
+            # Export less often to keep notebook output and Drive file growth small.
+            if ep % ONNX_EXPORT_INTERVAL == 0:
+                latest_onnx = os.path.join(SAVE_DIR, "doubt_royale_latest.onnx")
+                export_policy_onnx(agent.policy, latest_onnx)
+                print(f"🚀 ONNXモデルを書き出しました: {latest_onnx}")
             
             agent.ref_policy.load_state_dict(agent.policy.state_dict())
             new_opp = ActorCriticNet(114, 176).to(DEVICE)
             new_opp.load_state_dict(agent.policy.state_dict()); new_opp.eval()
             opponent_pool.append(new_opp)
             if len(opponent_pool) > 10: opponent_pool.pop(0)
-            print(f"🚀 ONNXモデルを書き出しました: {latest_onnx}")
 
 if __name__ == "__main__":
     train()
