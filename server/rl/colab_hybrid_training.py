@@ -1324,10 +1324,15 @@ class ActorCriticNet(nn.Module):
         nn.init.orthogonal_(self.actor.weight, gain=0.01)
         nn.init.orthogonal_(self.critic.weight, gain=1.0)
 
-    def forward(self, x):
+    def forward_logits(self, x):
         features = self.shared(x)
-        probs = F.softmax(self.actor(features), dim=-1)
+        logits = self.actor(features)
         value = self.critic(features)
+        return logits, value
+
+    def forward(self, x):
+        logits, value = self.forward_logits(x)
+        probs = F.softmax(logits, dim=-1)
         return probs, value
 
 class DeepNashAgent:
@@ -1346,6 +1351,7 @@ class DeepNashAgent:
         self.entropy_coef = 0.01
         self.update_epochs = 4
         self.minibatch_size = 256
+        self.nonfinite_update_count = 0
         self.states, self.actions, self.masks = [], [], []
         self.logprobs, self.values, self.rewards, self.dones = [], [], [], []
 
@@ -1368,7 +1374,12 @@ class DeepNashAgent:
             group['lr'] = max(group['lr'] * 0.5, 1e-5)
             group['eps'] = 1e-5
         self._clear_rollout()
-        print(f"⚠️ Non-finite PPO update skipped ({reason}); restored weights and reduced learning rate.")
+        self.nonfinite_update_count += 1
+        if self.nonfinite_update_count == 1 or self.nonfinite_update_count % 100 == 0:
+            print(
+                f"⚠️ Non-finite PPO update skipped ({reason}); restored weights and "
+                f"reduced learning rate. Consecutive skipped updates: {self.nonfinite_update_count}."
+            )
 
     def _restore_reference_policy(self, reason):
         reference_is_finite = all(
@@ -1386,35 +1397,29 @@ class DeepNashAgent:
         print(f"⚠️ Restored reference policy after {reason}; reduced learning rate.")
 
     @staticmethod
-    def apply_action_mask(probs, masks):
-        safe_probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
-        safe_masks = torch.nan_to_num(masks, nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
-        masked = safe_probs * safe_masks
-        totals = masked.sum(dim=-1, keepdim=True)
-        mask_totals = safe_masks.sum(dim=-1, keepdim=True)
-        fallback = safe_masks / mask_totals.clamp(min=1.0)
-        no_legal_action = mask_totals <= 0
-        pass_fallback = torch.zeros_like(safe_masks)
-        pass_fallback[..., 0] = 1.0
-        fallback = torch.where(no_legal_action, pass_fallback, fallback)
-        valid_totals = torch.isfinite(totals) & (totals > 0)
-        return torch.where(valid_totals, masked / totals.clamp(min=1e-8), fallback)
+    def apply_action_mask_to_logits(logits, masks):
+        safe_masks = torch.nan_to_num(masks, nan=0.0, posinf=0.0, neginf=0.0)
+        legal = safe_masks > 0
+        no_legal_action = ~legal.any(dim=-1, keepdim=True)
+        pass_fallback = torch.zeros_like(legal)
+        pass_fallback[..., 0] = True
+        legal = torch.where(no_legal_action, pass_fallback, legal)
+        return logits.masked_fill(~legal, -1e9)
 
     def select_action(self, state, action_mask):
         state_t = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         mask_t = torch.FloatTensor(action_mask).unsqueeze(0).to(self.device)
         if not torch.isfinite(state_t).all():
             raise ValueError("Observation contains non-finite values.")
-        with torch.no_grad(): probs, val = self.policy(state_t)
-        if not torch.isfinite(probs).all() or not torch.isfinite(val).all():
+        with torch.no_grad(): logits, val = self.policy.forward_logits(state_t)
+        if not torch.isfinite(logits).all() or not torch.isfinite(val).all():
             self._restore_reference_policy("non-finite policy output")
-            with torch.no_grad(): probs, val = self.policy(state_t)
-        if not torch.isfinite(probs).all() or not torch.isfinite(val).all():
+            with torch.no_grad(): logits, val = self.policy.forward_logits(state_t)
+        if not torch.isfinite(logits).all() or not torch.isfinite(val).all():
             raise RuntimeError("Policy still produces non-finite outputs after recovery.")
-        probs = self.apply_action_mask(probs, mask_t)
-        if not torch.isfinite(probs).all():
-            raise RuntimeError("Masked action probabilities contain non-finite values.")
-        dist = Categorical(probs); action = dist.sample()
+        masked_logits = self.apply_action_mask_to_logits(logits, mask_t)
+        dist = Categorical(logits=masked_logits)
+        action = dist.sample()
         self.states.append(state_t)
         self.actions.append(action)
         self.masks.append(mask_t)
@@ -1462,20 +1467,17 @@ class DeepNashAgent:
             permutation = torch.randperm(batch_size, device=self.device)
             for start in range(0, batch_size, self.minibatch_size):
                 indices = permutation[start:start + self.minibatch_size]
-                raw_probs, predicted_values = self.policy(states[indices])
-                if not torch.isfinite(raw_probs).all() or not torch.isfinite(predicted_values).all():
+                logits, predicted_values = self.policy.forward_logits(states[indices])
+                if not torch.isfinite(logits).all() or not torch.isfinite(predicted_values).all():
                     self._rollback_update(policy_backup, "non-finite network output")
                     return
-                probs = raw_probs
-                probs = self.apply_action_mask(probs, masks[indices])
-                if not torch.isfinite(probs).all() or not torch.isfinite(predicted_values).all():
-                    self._rollback_update(policy_backup, "non-finite network output")
-                    return
-                dist = Categorical(probs)
+                masked_logits = self.apply_action_mask_to_logits(logits, masks[indices])
+                dist = Categorical(logits=masked_logits)
                 logprobs = dist.log_prob(actions[indices])
                 entropy = dist.entropy().mean()
 
-                ratios = torch.exp(logprobs - old_logprobs[indices])
+                log_ratio = logprobs - old_logprobs[indices]
+                ratios = torch.exp(log_ratio.clamp(min=-20.0, max=20.0))
                 unclipped = ratios * advantages[indices]
                 clipped = torch.clamp(
                     ratios, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon
@@ -1484,11 +1486,14 @@ class DeepNashAgent:
                 value_loss = F.mse_loss(predicted_values.view(-1), returns[indices])
 
                 with torch.no_grad():
-                    ref_probs, _ = self.ref_policy(states[indices])
-                    ref_probs = self.apply_action_mask(ref_probs, masks[indices])
-                kl = (
-                    probs * (torch.log(probs + 1e-10) - torch.log(ref_probs + 1e-10))
-                ).sum(-1).mean()
+                    ref_logits, _ = self.ref_policy.forward_logits(states[indices])
+                    ref_masked_logits = self.apply_action_mask_to_logits(
+                        ref_logits, masks[indices]
+                    )
+                    ref_dist = Categorical(logits=ref_masked_logits)
+                current_probs = dist.probs
+                kl_terms = current_probs * (dist.logits - ref_dist.logits)
+                kl = torch.where(current_probs > 0, kl_terms, 0.0).sum(-1).mean()
 
                 loss = (
                     actor_loss
@@ -1501,6 +1506,16 @@ class DeepNashAgent:
                     return
                 self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
+                bad_gradient_names = [
+                    name
+                    for name, parameter in self.policy.named_parameters()
+                    if parameter.grad is not None
+                    and not torch.isfinite(parameter.grad).all().item()
+                ]
+                if bad_gradient_names:
+                    detail = ", ".join(bad_gradient_names[:3])
+                    self._rollback_update(policy_backup, f"non-finite gradients in {detail}")
+                    return
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
                 if not torch.isfinite(grad_norm):
                     self._rollback_update(policy_backup, "non-finite gradients")
@@ -1511,6 +1526,7 @@ class DeepNashAgent:
                     return
 
         self._clear_rollout()
+        self.nonfinite_update_count = 0
 
 
 def evaluate_policy(policy, episodes=EVAL_EPISODES, base_seed=EVAL_BASE_SEED):
