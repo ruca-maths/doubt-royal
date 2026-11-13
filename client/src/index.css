@@ -9,15 +9,29 @@
 
 @media (max-width: 768px), (max-height: 600px) {
   :root {
-    --card-width: 60px;
-    --card-height: 90px;
+    --card-width: 52px;
+    --card-height: 78px;
+  }
+}
+
+@media (max-width: 640px) and (orientation: portrait) {
+  :root {
+    --card-width: 44px;
+    --card-height: 66px;
+  }
+}
+
+@media (max-width: 380px) and (orientation: portrait) {
+  :root {
+    --card-width: 40px;
+    --card-height: 60px;
   }
 }
 
 @media (max-height: 450px) {
   :root {
-    --card-width: 48px;
-    --card-height: 72px;
+    --card-width: 44px;
+    --card-height: 66px;
   }
 }
 
@@ -195,4 +209,58 @@ body::before {
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(99, 102, 241, 0.5);
+}
+
+
+/* ===== Responsive game layout ===== */
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100dvh;
+  overscroll-behavior: none;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+.card-container {
+  flex: 0 0 auto;
+  touch-action: manipulation;
+}
+
+@media (hover: none) {
+  .card-container:hover {
+    transform: none;
+  }
+
+  .card-container.selected {
+    transform: translateY(-12px);
+  }
+}
+
+.safe-area-bottom {
+  padding-bottom: max(0.35rem, env(safe-area-inset-bottom));
+}
+
+@media (max-width: 640px) {
+  .card-container.selected {
+    transform: translateY(-10px);
+  }
+
+  .card-face,
+  .card-back {
+    border-radius: 7px;
+  }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .safe-area-bottom {
+    padding-bottom: 0.25rem;
+  }
 }
