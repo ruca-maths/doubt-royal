@@ -22,8 +22,8 @@ export default function PlayCardModal({ selectedCount, onConfirm, onCancel }: Pl
   const numbers = Array.from({ length: 13 }, (_, i) => i + 1);
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 animate-fade-in">
-      <div className="glass rounded-2xl p-6 max-w-md w-full mx-4 animate-slide-up">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-3 animate-fade-in">
+      <div className="glass my-auto max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl p-4 sm:p-6 animate-slide-up">
         <h3 className="text-xl font-bold text-center mb-1" style={{ fontFamily: 'Orbitron, sans-serif' }}>
           カードを出す
         </h3>
