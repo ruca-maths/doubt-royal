@@ -2,9 +2,12 @@ import { Room, Player, Card } from './types';
 import { GameEngine } from './engine';
 import { DoubtManager } from './doubt';
 import { getCardStrength, validatePlayCards } from './validator';
-import { StrategyEngine } from './strategy';
-import * as ort from 'onnxruntime-node';
+import { BotPolicy } from './botPolicy';
+import { Brain } from './brain/brain';
+import type * as ort from 'onnxruntime-node';
 import path from 'path';
+
+type PlayAction = { type: 'play' | 'pass'; cards?: Card[]; declaredNumber?: number };
 
 
 export class AIEngine {
@@ -12,21 +15,61 @@ export class AIEngine {
   private static session: ort.InferenceSession | null = null;
   private static sessionPromise: Promise<ort.InferenceSession | null> | null = null;
 
+  private static ortRuntime: typeof ort | null = null;
+
+  // The built-in policy works without a model; trained models are opt-in.
+  private static shouldUseTrainedModel(): boolean {
+    return process.env.DOUBT_ROYALE_USE_MODEL === 'true';
+  }
+
+  /** onnxruntime is only loaded when a trained model is actually requested. */
+  private static runtime(): typeof ort {
+    if (!this.ortRuntime) {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      this.ortRuntime = require('onnxruntime-node') as typeof ort;
+    }
+    return this.ortRuntime;
+  }
+
+  // ===== Default CPU policy: Brain (card counting + expected value). =====
+  // BotPolicy (the previous rule-based CPU) is kept as a safety net if Brain ever throws.
+
+  private static policyPlay(room: Room, player: Player): PlayAction {
+    try {
+      return Brain.decidePlay(room, player);
+    } catch (err) {
+      console.error('[AI Brain] decidePlay failed, falling back:', err);
+      return BotPolicy.decidePlay(room, player);
+    }
+  }
+
+  private static policyDoubt(room: Room, player: Player): boolean {
+    try {
+      return Brain.shouldDoubt(room, player);
+    } catch (err) {
+      console.error('[AI Brain] shouldDoubt failed, falling back:', err);
+      return BotPolicy.shouldDoubt(room, player);
+    }
+  }
+
+  private static policyCounter(room: Room, player: Player): Card[] {
+    try {
+      return Brain.chooseCounter(room, player);
+    } catch (err) {
+      console.error('[AI Brain] chooseCounter failed, falling back:', err);
+      return BotPolicy.chooseCounter(room, player);
+    }
+  }
+
   static clearThinkingPlayers(): void {
     console.log('[AI Engine] Clearing thinking players guard.');
     this.thinkingPlayers.clear();
-    StrategyEngine.loadStrategyData();
-    StrategyEngine.clearAll();
   }
 
   static initializeStrategy(room: Room): void {
-    for (const player of room.players) {
-      if (player.isAI) {
-        StrategyEngine.resetPlayer(player.id);
-        StrategyEngine.planPlaySequence(player.id, player.hand, room.rules);
-        console.log(`[AI Engine] Strategy planned for ${player.name}`);
-      }
-    }
+    Brain.resetRoom(room.id);
+    const count = room.players.filter(player => player.isAI).length;
+    console.log(`[AI Engine] Initialized Brain policy for ${count} CPU player(s).`);
   }
 
   private static getModelPath(): string {
@@ -88,7 +131,7 @@ export class AIEngine {
       try {
         const modelPath = this.getModelPath();
         console.log(`AI Logic: Loading RL Model from ${modelPath}...`);
-        this.session = await ort.InferenceSession.create(modelPath);
+        this.session = await this.runtime().InferenceSession.create(modelPath);
         console.log('AI Logic: RL Model loaded successfully.');
         return this.session;
       } catch (e) {
@@ -117,9 +160,11 @@ export class AIEngine {
     };
 
     let session: ort.InferenceSession | null = null;
-    try {
-      session = await this.getSession();
-    } catch (err) {}
+    if (this.shouldUseTrainedModel()) {
+      try {
+        session = await this.getSession();
+      } catch (err) {}
+    }
 
     const stateVector = this.getStateVector(room, player);
     const thinkingTime = Math.floor(Math.random() * 2000) + 1500;
@@ -149,70 +194,22 @@ export class AIEngine {
                 },
                 room.rules
               );
-              if (!validation.valid) {
-                 if (StrategyEngine.hasData()) {
-                    action = StrategyEngine.decidePlay(playerId, room, player);
-                 } else {
-                    action = this.decidePlayActionHeuristic(room, player);
-                 }
-              }
+              if (!validation.valid) action = this.policyPlay(room, player);
             }
           } catch (e) {
-             if (StrategyEngine.hasData()) {
-                action = StrategyEngine.decidePlay(playerId, room, player);
-             } else {
-                action = this.decidePlayActionHeuristic(room, player);
-             }
-          }
-        } else if (StrategyEngine.hasData()) {
-          try {
-            action = StrategyEngine.decidePlay(playerId, room, player);
-            if (action.type === 'play' && action.cards) {
-              const validation = validatePlayCards(
-                action.cards, 
-                action.declaredNumber!, 
-                { 
-                  currentCardCount: room.field.currentCards.length, 
-                  declaredNumber: room.field.declaredNumber,
-                  lastPlayerId: room.field.lastPlayerId
-                },
-                room.rules
-              );
-              if (!validation.valid) action = this.decidePlayActionHeuristic(room, player);
-            }
-          } catch (e) {
-            action = this.decidePlayActionHeuristic(room, player);
+             action = this.policyPlay(room, player);
           }
         } else {
-          action = this.decidePlayActionHeuristic(room, player);
+          action = this.policyPlay(room, player);
         }
         
         const isFieldEmpty = room.field.currentCards.length === 0 || room.field.lastPlayerId === null || room.field.lastPlayerId === player.id;
         if (action.type === 'pass' && isFieldEmpty && player.hand.length > 0) {
           console.warn(`[AI Guard] AI tried to PASS on empty field. Forcing play.`);
-          if (StrategyEngine.hasData()) {
-             action = StrategyEngine.decidePlay(playerId, room, player);
-             if (action.type === 'pass') action = this.decidePlayActionHeuristic(room, player);
-          } else {
-             action = this.decidePlayActionHeuristic(room, player);
-          }
+          action = this.policyPlay(room, player);
           // Final sanity check: if still pass, force first card
           if (action.type === 'pass' && player.hand.length > 0) {
             action = { type: 'play', cards: [player.hand[0]], declaredNumber: player.hand[0].isJoker ? 0 : player.hand[0].number };
-          }
-        }
-
-        // Strategic pass: if AI can only bluff (no honest play), sometimes pass instead
-        if (action.type === 'play' && action.cards && !isFieldEmpty) {
-          const declaredNum = action.declaredNumber!;
-          const isHonest = action.cards.every(c => (c.isJoker ? 0 : c.number) === declaredNum);
-          const isJokerPlay = declaredNum === 0;
-          if (!isHonest || isJokerPlay) {
-            // Pass ~40% of the time when bluffing, ~60% when playing Joker
-            const passChance = isJokerPlay ? 0.6 : 0.4;
-            if (Math.random() < passChance) {
-              action = { type: 'pass' };
-            }
           }
         }
 
@@ -252,7 +249,7 @@ export class AIEngine {
   }
 
   private static async predict(session: ort.InferenceSession, state: number[], allowedActions?: number[]): Promise<number> {
-    const input = new ort.Tensor('float32', new Float32Array(state), [1, 114]);
+    const input = new (this.runtime().Tensor)('float32', new Float32Array(state), [1, 114]);
     const results = await session.run({ input });
     let outputData: Float32Array;
     if (results.output) {
@@ -281,7 +278,7 @@ export class AIEngine {
    * Returns the raw value estimate (expected cumulative reward).
    */
   private static async getCriticValue(session: ort.InferenceSession, state: number[]): Promise<number> {
-    const input = new ort.Tensor('float32', new Float32Array(state), [1, 114]);
+    const input = new (this.runtime().Tensor)('float32', new Float32Array(state), [1, 114]);
     const results = await session.run({ input });
     
     // The ActorCriticNet outputs: [action_probs, critic_value]
@@ -323,36 +320,8 @@ export class AIEngine {
    * Synchronous heuristic-based win rate calculation for immediate UI feedback.
    */
   static calculateSnapshotWinRates(room: Room): Record<string, number> {
-    const activePlayers = room.players.filter(p => !p.isOut && p.lives > 0);
-    if (activePlayers.length === 0) return {};
-
-    let totalScore = 0;
-    const scores: Record<string, number> = {};
-
-    for (const p of activePlayers) {
-      // Score based on hand size (fewer cards = better)
-      const handScore = Math.pow(Math.max(1, 20 - p.hand.length), 1.5) * 5;
-      // Score based on lives
-      const lifeScore = p.lives * 40;
-      // Score based on card quality
-      const cardQuality = p.hand.reduce((acc, c) => {
-        if (c.isJoker) return acc + 50;
-        if (c.number === 2) return acc + 30; // 2 is strong
-        if (c.number === 1) return acc + 20; // 1 is strong
-        if (c.number === 8 || c.number === 11 || c.number === 3 || c.number === 7) return acc + 10;
-        return acc + 5;
-      }, 0);
-
-      const score = handScore + lifeScore + cardQuality;
-      scores[p.id] = score;
-      totalScore += score;
-    }
-
-    const rates: Record<string, number> = {};
-    for (const p of activePlayers) {
-      rates[p.id] = Math.max(1, Math.min(99, Math.round((scores[p.id] / totalScore) * 100)));
-    }
-    return rates;
+    // "Turns needed to go out" based estimate (see brain/evaluate.ts). Spectators only.
+    return Brain.estimateWinRates(room);
   }
 
   /**
@@ -363,9 +332,11 @@ export class AIEngine {
     if (!room.winRates) room.winRates = {};
     
     let session: ort.InferenceSession | null = null;
-    try {
-      session = await this.getSession();
-    } catch (e) {}
+    if (this.shouldUseTrainedModel()) {
+      try {
+        session = await this.getSession();
+      } catch (e) {}
+    }
 
     const activePlayers = room.players.filter(p => !p.isOut);
     if (activePlayers.length === 0) return;
@@ -582,7 +553,9 @@ export class AIEngine {
   static async runDoubtDecision(room: Room, onDoubtDeclared: (playerId: string) => void, onDoubtResolved: () => void): Promise<void> {
     if (room.phase !== 'doubtPhase') return;
     let session: ort.InferenceSession | null = null;
-    try { session = await this.getSession(); } catch (e) {}
+    if (this.shouldUseTrainedModel()) {
+      try { session = await this.getSession(); } catch (e) {}
+    }
     const activeAIs = room.players.filter(p => p.isAI && !p.isOut && p.id !== room.field.lastPlayerId);
     activeAIs.forEach(async ai => {
       if (room.doubtSkippers.includes(ai.id) || room.doubtDeclarers.includes(ai.id)) return;
@@ -598,43 +571,19 @@ export class AIEngine {
           }
           let willDoubt = false;
           
-          // 1. 確定ダウト（100%証拠に基づく防波堤ロジック）
-          const decNum = room.field.declaredNumber;
-          const maxCards = decNum === 0 ? 2 : 4;
-          const faceUpCount = room.field.faceUpPool.filter(c => (c.isJoker ? 0 : c.number) === decNum).length;
-          const myCount = ai.hand.filter(c => (c.isJoker ? 0 : c.number) === decNum).length;
-          const playedCount = room.field.currentCards.length;
-          
-          let isObviousLie = (faceUpCount + myCount + playedCount > maxCards);
-          
-          // 1-2. スペ3カウンターに対する確実なダウト
-          if (room.field.doubtType === 'counter' && decNum === 3 && room.field.currentCards.length === 1) {
-            if (ai.hand.some(c => c.suit === 'spade' && c.number === 3)) {
-              isObviousLie = true;
-            }
-          }
-
-          if (isObviousLie) {
-            willDoubt = true; // モデルの推論を無視して絶対ダウト
-          } else {
-            // 2. 確定ではない場合、ルールベース or AIモデルを使用
-            if (StrategyEngine.hasData()) {
-              try {
-                const result = StrategyEngine.shouldDoubt(ai.id, room.field.declaredNumber, room.field.currentCards.length, room.field.faceUpPool, ai.hand, room);
-                willDoubt = result.doubt;
-              } catch (e) {
-                willDoubt = Math.random() < 0.1;
-              }
-            } else if (session) {
+          if (session) {
+            if (BotPolicy.isProvableLie(room, ai)) {
+              willDoubt = true;
+            } else {
               try {
                 const action = await this.predict(session, stateVector, [0, 105]);
                 willDoubt = (action === 105);
               } catch (e) {
-                willDoubt = Math.random() < 0.1;
+                willDoubt = this.policyDoubt(room, ai);
               }
-            } else {
-              willDoubt = Math.random() < 0.1;
             }
+          } else {
+            willDoubt = this.policyDoubt(room, ai);
           }
           if (willDoubt) {
             const success = DoubtManager.registerDoubt(room, ai.id);
@@ -662,7 +611,9 @@ export class AIEngine {
     if (this.thinkingPlayers.has(actorId)) return;
     this.thinkingPlayers.add(actorId);
     let session: ort.InferenceSession | null = null;
-    try { session = await this.getSession(); } catch (e) {}
+    if (this.shouldUseTrainedModel()) {
+      try { session = await this.getSession(); } catch (e) {}
+    }
     const stateVector = this.getStateVector(room, player);
     const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
     setTimeout(async () => {
@@ -690,16 +641,7 @@ export class AIEngine {
             if (spade3) counterCards = [spade3];
           }
         }
-        if (!willCounter || counterCards.length === 0) {
-          if (this.canCounterHeuristic(room, player) && Math.random() < 0.8) {
-            if (room.field.declaredNumber === 8) {
-              counterCards = player.hand.filter(c => c.number === 4).slice(0, room.field.currentCards.length + 1);
-            } else {
-              const s3 = player.hand.find(c => c.suit === 'spade' && c.number === 3);
-              if (s3) counterCards = [s3];
-            }
-          }
-        }
+        if (counterCards.length === 0) counterCards = this.policyCounter(room, player);
         if (counterCards.length > 0) {
           const result = GameEngine.declareCounter(room, actorId, counterCards.map(c => c.id));
           this.thinkingPlayers.delete(actorId);
@@ -716,242 +658,39 @@ export class AIEngine {
     }, thinkingTime);
   }
 
-  private static canCounterHeuristic(room: Room, player: Player): boolean {
-    if (room.field.declaredNumber === 8) {
-        const fours = player.hand.filter(c => c.number === 4);
-        return fours.length >= room.field.currentCards.length + 1;
-    } else if (room.field.declaredNumber === 0 && room.field.currentCards.length === 1) {
-        return !!player.hand.find(c => c.suit === 'spade' && c.number === 3);
-    }
-    return false;
-  }
-
   static decidePlayActionHeuristic(room: Room, player: Player): { type: 'play' | 'pass', cards?: Card[], declaredNumber?: number } {
-    const fieldCardsCount = room.field.currentCards.length;
-    const isFieldEmpty = fieldCardsCount === 0 || room.field.lastPlayerId === null || room.field.lastPlayerId === player.id;
-    const handByNumber = new Map<number, Card[]>();
-    player.hand.forEach(c => {
-      const num = c.isJoker ? 0 : c.number;
-      if (!handByNumber.has(num)) handByNumber.set(num, []);
-      handByNumber.get(num)!.push(c);
-    });
-
-    // Filter out numbers that are fully exposed in faceUpPool (Q-Bomber destroyed)
-    const safeNumbers = (nums: number[]) => nums.filter(n => !this.isNumberExposedInFaceUp(room, player, n));
-
-    if (isFieldEmpty) {
-      let availableNumbers = Array.from(handByNumber.keys()).filter(n => n !== 0);
-      availableNumbers = safeNumbers(availableNumbers);
-      if (availableNumbers.length === 0) {
-        // Fall back to all non-joker numbers, then joker
-        availableNumbers = Array.from(handByNumber.keys()).filter(n => n !== 0);
-        if (availableNumbers.length === 0) availableNumbers = [0];
-      }
-      const isReversed = room.rules.isRevolution !== room.rules.isElevenBack;
-      availableNumbers.sort((a, b) => {
-        let rankA = (a === 2) ? 15 : (a === 1 ? 14 : a);
-        let rankB = (b === 2) ? 15 : (b === 1 ? 14 : b);
-        if (isReversed) {
-          rankA = (a === 2) ? -15 : (a === 1 ? -14 : -a);
-          rankB = (b === 2) ? -15 : (b === 1 ? -14 : -b);
-        }
-        return rankA - rankB;
-      });
-      const numToPlay = availableNumbers[0];
-      const cards = handByNumber.get(numToPlay)!;
-      return { type: 'play', cards: cards, declaredNumber: numToPlay };
-    } else {
-      const targetCount = fieldCardsCount;
-      const currentDeclared = room.field.declaredNumber;
-      for (const [num, cards] of Array.from(handByNumber.entries())) {
-        if (num === 0) continue; // Skip Jokers in normal iteration
-        if (this.isNumberExposedInFaceUp(room, player, num)) continue;
-        if (cards.length >= targetCount) {
-          const selectedCards = cards.slice(0, targetCount);
-          const validation = validatePlayCards(selectedCards, num, { currentCardCount: targetCount, declaredNumber: currentDeclared, lastPlayerId: room.field.lastPlayerId }, room.rules);
-          if (validation.valid) return { type: 'play', cards: selectedCards, declaredNumber: num };
-        }
-      }
-      if (isFieldEmpty && player.hand.length > 0) {
-        const numToPlay = player.hand[0].isJoker ? 0 : player.hand[0].number;
-        const cardsToPlay = handByNumber.get(numToPlay) || [player.hand[0]];
-        return { type: 'play', cards: cardsToPlay, declaredNumber: numToPlay };
-      }
-      return { type: 'pass' };
-    }
+    return this.policyPlay(room, player);
   }
 
   static runEffectDecision(room: Room, onAction: () => void): void {
     if (room.phase !== 'effectPhase' || !room.pendingEffect) return;
     const effect = room.pendingEffect;
     const player = room.players.find(p => p.id === effect.playerId);
-    if (!player || !player.isAI) return;
-    // Allow isOut player to process if they are the target of the effect (e.g. giving cards after winning)
-    if (player.isOut && room.pendingEffect.playerId !== player.id) return;
-    if (this.thinkingPlayers.has(player.id)) return;
+    if (!player || !player.isAI || this.thinkingPlayers.has(player.id)) return;
+
     this.thinkingPlayers.add(player.id);
-    const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
-    setTimeout(async () => {
+    const thinkingTime = Math.floor(Math.random() * 1000) + 700;
+    setTimeout(() => {
       try {
-        if (room.phase !== 'effectPhase' || room.pendingEffect !== effect) {
-          this.thinkingPlayers.delete(player.id);
-          return;
+        if (room.phase !== 'effectPhase' || room.pendingEffect !== effect) return;
+        let action: { cardIds: string[]; targetData?: { numbers?: number[] } };
+        try {
+          action = Brain.chooseEffect(room, player, effect);
+        } catch (err) {
+          console.error('[AI Brain] chooseEffect failed, falling back:', err);
+          action = BotPolicy.chooseEffect(room, player, effect);
         }
-        let session: ort.InferenceSession | null = null;
-        try { session = await this.getSession(); } catch (e) {}
-        const cardIds: string[] = [];
-        let targetData: { numbers?: number[] } | undefined;
-        let modelAction = -1;
-        const modelPhase = effect.type === 'queenBomber'
-          ? 'q_bomb'
-          : effect.type === 'sixCollect'
-            ? 'six_absorb'
-            : 'card_sel';
-        if (session && effect.type !== 'doubtCardSelect' && effect.type !== 'queenBomber') {
-            const stateVector = this.getStateVector(room, player, modelPhase);
-            try {
-              modelAction = await this.predict(session, stateVector, this.getAllowedModelActions(room, player, effect.type));
-            } catch (e) {}
-        }
-        switch (effect.type) {
-          case 'sevenPass':
-          case 'doubtCardSelect':
-          case 'tenDiscard': {
-            const count = Math.min(effect.count, player.hand.length);
-            if (count > 0) {
-              if (modelAction >= 122 && modelAction <= 175) {
-                if (!(modelAction === 175 && player.hand.length < 54)) {
-                  const cardIdx = Math.min(modelAction - 122, player.hand.length - 1);
-                  cardIds.push(player.hand[cardIdx].id);
-                }
-              }
-              const modelPassed = modelAction === 175 && player.hand.length < 54;
-              if (!modelPassed) {
-                const sortedHand = [...player.hand].sort((a, b) => {
-                  const getStrength = (c: Card) => {
-                    if (c.isJoker) return 100;
-                    if (c.suit === 'spade' && c.number === 3) return 90;
-                    if (c.number === 2) return 80;
-                    if (c.number === 1) return 70;
-                    if (c.number === 8 || c.number === 11) return 60;
-                    return c.number;
-                  };
-                  return getStrength(a) - getStrength(b);
-                });
-                const excludedNumbers = (effect as any).excludedNumbers as number[] | undefined;
-                const availableCards = excludedNumbers
-                  ? sortedHand.filter(c => !excludedNumbers.includes(c.number) && !(excludedNumbers.includes(0) && c.isJoker))
-                  : sortedHand;
-                for (const card of availableCards) {
-                  if (cardIds.length >= count) break;
-                  if (!cardIds.includes(card.id)) cardIds.push(card.id);
-                }
-              }
-            }
-            break;
-          }
-          case 'sixCollect': {
-            const count = Math.min(effect.count, room.field.faceUpPool.length);
-            if (count > 0) {
-              if (modelAction >= 122 && modelAction <= 175 && modelAction - 122 < room.field.faceUpPool.length) {
-                cardIds.push(room.field.faceUpPool[modelAction - 122].id);
-              }
-              const modelPassed = modelAction === 175 && room.field.faceUpPool.length < 54;
-              const sortedPool = [...room.field.faceUpPool].sort((a, b) => {
-                let rankA = (a.number === 2) ? 15 : (a.number === 1 ? 14 : (a.isJoker ? 16 : a.number));
-                let rankB = (b.number === 2) ? 15 : (b.number === 1 ? 14 : (b.isJoker ? 16 : b.number));
-                if (room.rules.isRevolution) {
-                  rankA = (a.number === 2) ? -15 : (a.number === 1 ? -14 : (a.isJoker ? 16 : -a.number));
-                  rankB = (b.number === 2) ? -15 : (b.number === 1 ? -14 : (b.isJoker ? 16 : -b.number));
-                }
-                return rankB - rankA;
-              });
-              
-              // Only pick decent cards (rank logic: 8 or above in normal strength)
-              for (let i = 0; i < count; i++) {
-                const c = sortedPool[i];
-                if (cardIds.includes(c.id)) continue;
-                let rank = (c.number === 2) ? 15 : (c.number === 1 ? 14 : (c.isJoker ? 16 : c.number));
-                if (room.rules.isRevolution) {
-                  rank = (c.number === 2) ? -15 : (c.number === 1 ? -14 : (c.isJoker ? 16 : -c.number));
-                }
-                
-                // If it's a weak card, do not pick it up (unless it's revolution where negatives are stronger but we check rank size)
-                // Simplified decent logic: the cards are already sorted strongest first.
-                // If the strongest available isn't that great, we stop collecting.
-                if (!modelPassed && cardIds.length < count && ((!room.rules.isRevolution && rank >= 8) || (room.rules.isRevolution && rank >= -8) || c.isJoker)) {
-                   cardIds.push(c.id);
-                }
-              }
-            }
-            break;
-          }
-          case 'queenBomber': {
-            const numCount = effect.count;
-            const targetNumbers: number[] = [];
-
-            // Q-bomb training chooses one distinct rank at a time, with the
-            // observation updated after each simulated removal. Mirror that here.
-            const simulatedRoom = session ? {
-              ...room,
-              players: room.players.map(p => ({ ...p, hand: [...p.hand] })),
-              field: { ...room.field, faceUpPool: [...room.field.faceUpPool] },
-            } as Room : null;
-            const selectedNumbers = new Set<number>();
-            while (targetNumbers.length < numCount && selectedNumbers.size < 14) {
-              let chosenNum: number | undefined;
-              if (session && simulatedRoom) {
-                const simulatedPlayer = simulatedRoom.players.find(p => p.id === player.id);
-                if (simulatedPlayer) {
-                  const allowed = this.getAllowedModelActions(simulatedRoom, simulatedPlayer, effect.type)
-                    .filter(action => !selectedNumbers.has(action === 121 ? 0 : action - 107));
-                  try {
-                    const state = this.getStateVector(simulatedRoom, simulatedPlayer, 'q_bomb');
-                    const action = await this.predict(session, state, allowed);
-                    chosenNum = action === 121 ? 0 : action - 107;
-                  } catch (e) {}
-                }
-              }
-              if (chosenNum === undefined || chosenNum < 0 || chosenNum > 13 || selectedNumbers.has(chosenNum)) {
-                const available = Array.from({ length: 14 }, (_, n) => n).filter(n => !selectedNumbers.has(n));
-                if (available.length === 0) break;
-                chosenNum = available[Math.floor(Math.random() * available.length)];
-              }
-              const targetNum = chosenNum;
-              selectedNumbers.add(targetNum);
-              targetNumbers.push(targetNum);
-
-              if (simulatedRoom) {
-                for (const simulatedPlayer of simulatedRoom.players) {
-                  if (simulatedPlayer.isOut) continue;
-                  const removed = simulatedPlayer.hand.filter(card =>
-                    targetNum === 0 ? card.isJoker : !card.isJoker && card.number === targetNum
-                  );
-                  simulatedPlayer.hand = simulatedPlayer.hand.filter(card => !removed.some(drop => drop.id === card.id));
-                  simulatedRoom.field.faceUpPool.push(...removed);
-                }
-              }
-            }
-            
-            targetData = { numbers: targetNumbers };
-            break;
-          }
-        }
-        
-        // If hand is empty (already out), we send empty card list to proceed
-        if (player.hand.length === 0 && effect.type === 'doubtCardSelect') {
-          console.log(`[AI Guard] Empty hand AI completing doubt penalty.`);
-          GameEngine.handleEffectAction(room, effect.playerId, [], targetData);
-        } else {
-          GameEngine.handleEffectAction(room, effect.playerId, cardIds, targetData);
-        }
-        
-        this.thinkingPlayers.delete(player.id);
+        const result = GameEngine.handleEffectAction(room, effect.playerId, action.cardIds, action.targetData);
+        if (!result.success) console.error(`[AI Effect] ${player.name}: ${result.error}`);
         onAction();
       } catch (err) {
-        this.thinkingPlayers.delete(player.id);
+        console.error(`[AI Effect] ${player.name}:`, err);
         onAction();
+      } finally {
+        this.thinkingPlayers.delete(player.id);
       }
     }, thinkingTime);
   }
+
+
 }
