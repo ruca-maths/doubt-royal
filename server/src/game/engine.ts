@@ -139,6 +139,16 @@ export class GameEngine {
     // Apply card effects
     const effectResult = applyCardEffect(room, cards, declaredNumber, playerId);
 
+    // Mark that this player MAY be finishing (hand is empty)
+    // Actual win/forbidden-finish is resolved AFTER doubt phase
+    // so that a liar can be caught before winning.
+    // The declared number is remembered here because the field may be cleared
+    // (8-cut, 5-skip loop) before the finish is judged.
+    if (player.hand.length === 0) {
+      room.pendingFinishPlayerId = playerId;
+      room.pendingFinishDeclaredNumber = declaredNumber;
+    }
+
     // If it's Queen (12), move to Effect Phase BEFORE Doubt Phase
     // to ask for numbers first.
     if (declaredNumber === 12 && effectResult.pendingEffect) {
@@ -161,13 +171,6 @@ export class GameEngine {
       // Defer 7-pass and 10-discard effects until after doubt phase resolves
       // (so InteractionModal doesn't appear before doubt confirmation)
       room.deferredEffect = effectResult.pendingEffect;
-    }
-
-    // Mark that this player MAY be finishing (hand is empty)
-    // Actual win/forbidden-finish is resolved AFTER doubt phase
-    // so that a liar can be caught before winning.
-    if (player.hand.length === 0) {
-      room.pendingFinishPlayerId = playerId;
     }
 
     // Check if doubt should be skipped based on effect (though updated to false for 8 now)
@@ -267,6 +270,11 @@ export class GameEngine {
    * Handle doubt resolution effects on game state.
    */
   static handleDoubtResult(room: Room, result: DoubtResult): void {
+    GameEngine.applyDoubtResult(room, result);
+    GameEngine.settleAfterResolution(room);
+  }
+
+  private static applyDoubtResult(room: Room, result: DoubtResult): void {
     if (result.type === 'counter') {
       room.passCount = 0;
       GameEngine.addLog(room, 'counter', result.countererId, { revealedCards: result.revealedCards });
@@ -289,7 +297,7 @@ export class GameEngine {
         // Phase 7: Route rollback cards (Joker) to appropriate graveyard
         // Joker was played face-down initially, so it goes to regular grave
         if (room.rollbackState) {
-          room.field.roundPile.push(...room.rollbackState.currentCards);
+          GameEngine.buryPreviousFieldCards(room);
         }
         
         clearField(room);
@@ -317,7 +325,7 @@ export class GameEngine {
       // Phase 7: Route rollback cards (the original 8s) to appropriate graveyard
       // Original 8s were played face-down and never revealed -> regular grave
       if (room.rollbackState) {
-        room.field.roundPile.push(...room.rollbackState.currentCards);
+        GameEngine.buryPreviousFieldCards(room);
       }
       
       clearField(room);
@@ -343,7 +351,13 @@ export class GameEngine {
       }
     } else if (result.type === 'success') {
       console.log(`[Doubt SUCCESS] Doubter: ${result.doubterId}, Liar: ${result.liarId}, Cards: ${result.revealedCards.length}`);
-      
+      GameEngine.addLog(room, 'doubtSuccess', result.doubterId, {
+        revealedCards: result.revealedCards,
+        targetPlayerName: room.players.find(p => p.id === result.liarId)?.name,
+        declaredNumber: room.field.declaredNumber,
+        cardCount: result.revealedCards.length,
+      });
+
       // Move the liar's revealed cards to the face-up pool immediately (Phase 14 fix)
       // Since being revealed by doubt, they should be visible in the face-up graveyard.
       result.revealedCards.forEach(c => { c.isFaceUp = true; });
@@ -405,6 +419,7 @@ export class GameEngine {
       if (room.pendingFinishPlayerId === result.liarId) {
         console.log(`[Doubt SUCCESS] Liar ${result.liarId} was caught on their last card. Cancellation of winning status.`);
         room.pendingFinishPlayerId = null;
+        room.pendingFinishDeclaredNumber = null;
       }
 
       // Immediately restore liar to active state if they were already marked as isOut
@@ -459,7 +474,7 @@ export class GameEngine {
 
       // The cards were honestly played, so previous cards go to history
       if (room.rollbackState && room.rollbackState.currentCards.length > 0) {
-        room.field.roundPile.push(...room.rollbackState.currentCards);
+        GameEngine.buryPreviousFieldCards(room);
       }
 
       // Phase 14: Honest play is successful -> reset pass count
@@ -533,7 +548,7 @@ export class GameEngine {
       room.passCount = 0;
       // The cards were accepted, so previous cards go to history
       if (room.rollbackState && room.rollbackState.currentCards.length > 0) {
-        room.field.roundPile.push(...room.rollbackState.currentCards);
+        GameEngine.buryPreviousFieldCards(room);
       }
 
       // Check for 4-stop (8-cut survived) or Spade 3 (single Joker survived)
@@ -635,6 +650,22 @@ export class GameEngine {
   }
 
   /**
+   * Move the cards that were on the field before the latest play into the round pile.
+   * rollbackState is reused across the doubt and counter windows of the same play,
+   * so cards that are already in the pile are skipped to keep the pile count correct.
+   */
+  private static buryPreviousFieldCards(room: Room): void {
+    const previous = room.rollbackState?.currentCards;
+    if (!previous || previous.length === 0) return;
+    const inPile = new Set(room.field.roundPile.map(c => c.id));
+    for (const card of previous) {
+      if (inPile.has(card.id)) continue;
+      room.field.roundPile.push(card);
+      inPile.add(card.id);
+    }
+  }
+
+  /**
    * Resolve pending finish after doubt phase.
    * If the player's hand is still empty, apply win/forbidden-finish logic.
    * If doubt succeeded (cards returned to hand), the finish is canceled.
@@ -643,7 +674,11 @@ export class GameEngine {
     const finishPlayerId = room.pendingFinishPlayerId;
     if (!finishPlayerId) return;
 
+    // The declared number of the finishing play. The field may already have been
+    // cleared (8-cut, 5-skip loop), so room.field.declaredNumber cannot be trusted here.
+    const declaredNumber = room.pendingFinishDeclaredNumber ?? room.field.declaredNumber;
     room.pendingFinishPlayerId = null;
+    room.pendingFinishDeclaredNumber = null;
 
     const player = room.players.find(p => p.id === finishPlayerId);
     if (!player || player.isOut) return;
@@ -653,7 +688,7 @@ export class GameEngine {
 
     // Player's hand is still empty — resolve finish
     const isForbidden = checkForbiddenFinish(
-      room.field.declaredNumber,
+      declaredNumber,
       room.field.currentCards,
       room.rules.isRevolution
     );
@@ -671,6 +706,40 @@ export class GameEngine {
     const activePlayers = room.players.filter(p => !p.isOut && p.lives > 0);
     if (activePlayers.length <= 1) {
       GameEngine.finalizeGame(room);
+    }
+  }
+
+  /**
+   * Bring the room back to a consistent state after a doubt / effect has been resolved.
+   *  1. A player who has no cards left can never act again, so they are finished
+   *     (e.g. a liar caught on their last cards who was handed nothing, or a counter
+   *     played with every remaining card). Without this the game would wait forever
+   *     for someone with an empty hand to lead.
+   *  2. The turn must never rest on a player who is already out.
+   */
+  static settleAfterResolution(room: Room): void {
+    if (room.phase !== 'playing') return;
+
+    const stranded = room.players.filter(p => !p.isOut && p.lives > 0 && p.hand.length === 0);
+    for (const player of stranded) {
+      room.finishOrder.push(player.id);
+      player.rank = room.finishOrder.length;
+      player.isOut = true;
+      if (room.pendingFinishPlayerId === player.id) {
+        room.pendingFinishPlayerId = null;
+        room.pendingFinishDeclaredNumber = null;
+      }
+    }
+
+    const activePlayers = room.players.filter(p => !p.isOut && p.lives > 0);
+    if (activePlayers.length <= 1) {
+      GameEngine.finalizeGame(room);
+      return;
+    }
+
+    const current = room.players.find(p => p.id === room.turnOrder[room.currentPlayerIndex]);
+    if (!current || current.isOut || current.lives <= 0) {
+      GameEngine.advanceTurn(room);
     }
   }
 
@@ -801,6 +870,17 @@ export class GameEngine {
     cardIds: string[],
     targetData?: { numbers?: number[] }
   ): { success: boolean; error?: string } {
+    const result = GameEngine.applyEffectAction(room, playerId, cardIds, targetData);
+    if (result.success) GameEngine.settleAfterResolution(room);
+    return result;
+  }
+
+  private static applyEffectAction(
+    room: Room,
+    playerId: string,
+    cardIds: string[],
+    targetData?: { numbers?: number[] }
+  ): { success: boolean; error?: string } {
     const effect = room.pendingEffect;
     if (!effect) return { success: false, error: '保留中の効果がありません' };
     if (effect.playerId !== playerId) return { success: false, error: 'この効果のアクション権限がありません' };
@@ -857,6 +937,9 @@ export class GameEngine {
           const idx = room.field.faceUpPool.findIndex(c => c.id === cid);
           if (idx === -1) return { success: false, error: '表向きカードにないカードです' };
           const card = room.field.faceUpPool[idx];
+          // Back in a hand, the card is hidden again (otherwise it would be shown
+          // face-up to everyone the next time it is played).
+          card.isFaceUp = false;
           player.hand.push(card);
           collectedCards.push(card);
           room.field.faceUpPool.splice(idx, 1);
@@ -895,15 +978,16 @@ export class GameEngine {
         if (numbers.length > effect.count) {
           return { success: false, error: `最大${effect.count}個まで選択可能です` };
         }
-        if (numbers.length === 0) break;
         if (numbers.some(n => !Number.isInteger(n) || n < 0 || n > 13)) {
           return { success: false, error: '指定できる数字は1〜13またはジョーカーです' };
         }
         if (new Set(numbers).size !== numbers.length) {
           return { success: false, error: '同じ数字を複数回指定できません' };
         }
-        
-        room.field.pendingNumbers = numbers;
+
+        // Even when no number is named, the Q play itself must still go through
+        // the doubt window (otherwise a bluffed Q could never be challenged).
+        room.field.pendingNumbers = numbers.length > 0 ? numbers : undefined;
         room.pendingEffect = null;
         room.phase = 'doubtPhase'; // Start doubt window for Q-play
 
@@ -931,7 +1015,8 @@ export class GameEngine {
 
         // Phase 14: If the target player was "Out" (won on their last card but was lying),
         // receiving cards should restore them to the game.
-        if (targetPlayer.isOut) {
+        // (A doubter eliminated by losing their last life must stay out.)
+        if (targetPlayer.isOut && targetPlayer.lives > 0) {
           console.log(`[Restoring Liar] Player ${targetPlayer.id} receives cards and returns to game.`);
           targetPlayer.isOut = false;
           targetPlayer.rank = null;
@@ -963,9 +1048,22 @@ export class GameEngine {
 
     // Check if the player who used the effect just went out
     if (player.hand.length === 0 && !player.isOut) {
-      room.finishOrder.push(player.id);
-      player.rank = room.finishOrder.length;
-      player.isOut = true;
+      // If the hand was emptied by the play itself (not by this effect), the
+      // forbidden-finish rule still applies to the number that was declared.
+      const finishedByPlay = room.pendingFinishPlayerId === player.id;
+      const declaredForFinish = room.pendingFinishDeclaredNumber ?? room.field.declaredNumber;
+      if (finishedByPlay) {
+        room.pendingFinishPlayerId = null;
+        room.pendingFinishDeclaredNumber = null;
+      }
+      if (finishedByPlay && checkForbiddenFinish(declaredForFinish, [], room.rules.isRevolution)) {
+        player.rank = -1;
+        player.isOut = true;
+      } else {
+        room.finishOrder.push(player.id);
+        player.rank = room.finishOrder.length;
+        player.isOut = true;
+      }
 
       const activePlayersAfterEffect = room.players.filter(p => !p.isOut && p.lives > 0);
       if (activePlayersAfterEffect.length <= 1) {
@@ -1040,6 +1138,7 @@ export class GameEngine {
         isOut: p.isOut,
         isCurrentTurn: room.turnOrder[room.currentPlayerIndex] === p.id,
         rankStats: p.rankStats,
+        isAI: p.isAI,
         // Reliable win rate display for spectators with instant fallback
         winRate: isSpectator ? (room.winRates?.[p.id] ?? snapshots[p.id]) : undefined,
       })),

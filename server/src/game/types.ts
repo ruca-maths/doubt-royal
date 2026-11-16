@@ -112,6 +112,8 @@ export interface Room {
     skippedPlayerIds: string[];
   };
   pendingFinishPlayerId: string | null;
+  /** 上がり判定待ちのプレイで宣言された数字 (場が流れても禁止上がりを正しく判定するため) */
+  pendingFinishDeclaredNumber?: number | null;
   counterActorIndex: number | null;
   passCount: number;
   logs: LogEntry[];
