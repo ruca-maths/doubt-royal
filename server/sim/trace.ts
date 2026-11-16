@@ -1,3 +1,7 @@
+/**
+ * 1局を全手トレースする (brain 1人 vs legacy 3人)。CPU の判断を目で追うためのデバッグ用。
+ *   npx ts-node -T sim/trace.ts
+ */
 import { runGame, Policy } from './driver';
 import { legacyPolicy } from './policies';
 import { createBrainPolicy } from './brainPolicy';
