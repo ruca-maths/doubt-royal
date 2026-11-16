@@ -45,6 +45,8 @@ export interface PendingEffect {
   playerId: string;
   count: number;
   targetPlayerId?: string;
+  /** Qボンバーで破壊された数字 (ダウト報酬では渡せない) */
+  excludedNumbers?: number[];
 }
 
 export interface RulesState {
@@ -64,6 +66,7 @@ export interface ClientPlayer {
   isOut: boolean;
   isCurrentTurn: boolean;
   rankStats: Record<number, number>;
+  isAI?: boolean;
   winRate?: number;
 }
 
@@ -115,6 +118,8 @@ export type DoubtResult =
       lastPlayerId: string;
       revealedCards?: Card[];
       count: number;
+      /** カウンターをダウトして外した人 (いれば) */
+      doubterId?: string;
     }
   | {
       type: 'success';
@@ -123,7 +128,7 @@ export type DoubtResult =
       revealedCards?: Card[];
       penaltyCardCount: number;
       count: number;
-      doubtType: 'play' | 'discard';
+      doubtType: 'play' | 'discard' | 'counter';
     }
   | {
       type: 'failure';
@@ -132,5 +137,5 @@ export type DoubtResult =
       revealedCards?: Card[];
       penaltyCardCount: number;
       count: number;
-      doubtType: 'play' | 'discard';
+      doubtType: 'play' | 'discard' | 'counter';
     };

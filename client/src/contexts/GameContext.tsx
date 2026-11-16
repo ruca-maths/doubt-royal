@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, Rea
 import { Socket } from 'socket.io-client';
 import { ClientGameState, RoomInfo, DoubtResult } from '../types/game';
 
-interface GameContextValue {
+export interface GameContextValue {
   // Connection
   socket: Socket | null;
   isConnected: boolean;
@@ -23,6 +23,8 @@ interface GameContextValue {
   gameState: ClientGameState | null;
   doubtResult: DoubtResult | null;
   clearDoubtResult: () => void;
+  /** 現在のダウト受付中に「ダウト！」を宣言したプレイヤー */
+  doubtDeclarers: string[];
   playCards: (cardIds: string[], declaredNumber: number) => void;
   passTurn: () => void;
   playAgain: () => void;
@@ -36,7 +38,7 @@ interface GameContextValue {
   clearError: () => void;
 }
 
-const GameContext = createContext<GameContextValue | null>(null);
+export const GameContext = createContext<GameContextValue | null>(null);
 
 export function useGame() {
   const ctx = useContext(GameContext);
@@ -56,6 +58,7 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
   const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(null);
   const [gameState, setGameState] = useState<ClientGameState | null>(null);
   const [doubtResult, setDoubtResult] = useState<DoubtResult | null>(null);
+  const [doubtDeclarers, setDoubtDeclarers] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const myId = socket?.id || null;
 
@@ -101,12 +104,13 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
 
     socket.on('doubt-result', (data: DoubtResult) => {
       setDoubtResult(data);
-      // Show result for 2.5 seconds (shortened)
-      setTimeout(() => setDoubtResult(null), 2500);
+      setDoubtDeclarers([]);
+      // Show result for a few seconds
+      setTimeout(() => setDoubtResult(current => (current === data ? null : current)), 3200);
     });
 
     socket.on('doubt-declared', (data: { playerId: string }) => {
-      // Notification handled in UI or effect
+      setDoubtDeclarers(prev => (prev.includes(data.playerId) ? prev : [...prev, data.playerId]));
     });
 
     socket.on('counter-declared', (data: { playerId: string }) => {
@@ -260,7 +264,7 @@ export function GameProvider({ children, socket, isConnected }: GameProviderProp
     playerName, setPlayerName,
     roomId, roomInfo,
     createRoom, joinRoom, leaveRoom, startGame, addAiPlayer,
-    gameState, doubtResult, clearDoubtResult,
+    gameState, doubtResult, clearDoubtResult, doubtDeclarers,
     playCards, passTurn, playAgain, declareDoubt, skipDoubt, declareCounter, effectAction,
     error, clearError,
   };
