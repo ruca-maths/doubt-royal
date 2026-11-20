@@ -52,6 +52,8 @@ export interface BrainParams {
   evidencePower: number;
 
   // ---- ダウトの損得 ----
+  /** server/models/doubt-model.json (学習済みの嘘判定モデル) があれば使う */
+  useLearnedDoubt: boolean;
   /** ダウト成功で押し付けられるカード1枚の価値 */
   shedValue: number;
   /** ライフを失うコスト (残り3 → 2) */
@@ -103,6 +105,7 @@ export const DEFAULT_PARAMS: BrainParams = {
   baseCounter: 0.54,
   evidencePower: 0.8,
 
+  useLearnedDoubt: true,
   shedValue: 1.0,
   lifeCost3: 1.0,
   lifeCost2: 2.6,

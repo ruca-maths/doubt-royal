@@ -1,4 +1,9 @@
 node_modules
 dist
+dist-sim
 .env
 .DS_Store
+
+# 学習データ・学習結果 (server/learn/README.md)
+server/learn/data/
+server/learn/runs/

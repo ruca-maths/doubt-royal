@@ -10,6 +10,10 @@ import { Policy } from './driver';
 export const variants: Record<string, Partial<BrainParams>> = {
   // 嘘をほとんどつかない
   timid: { bluffMargin: 5 },
+  // 学習済みモデルを使わず、手作りの嘘判定だけで打つ
+  heuristic: { useLearnedDoubt: false },
+  // 嘘を多めにつく
+  bold: { bluffMargin: -0.4 },
   // ダウトをほとんどしない
   trusting: { lifeCost3: 8, lifeCost2: 12 },
 };

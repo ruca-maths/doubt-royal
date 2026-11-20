@@ -74,6 +74,21 @@ export function publicPossibility(
   return hyperTail(total, supply, handBefore, count);
 }
 
+/** 1人のプレイヤーの宣言の履歴 (全員に公開されている情報だけから作る) */
+export interface ClaimHistory {
+  /** ランク別に、宣言した延べ枚数 (判定待ちの宣言を含む) */
+  claimedCards: number[];
+  /** ランク別に、ダウトされずに通った延べ枚数 */
+  passedCards: number[];
+  /** 同じランクを連続して宣言している回数 (判定待ちの宣言を含む) */
+  streakRank: number;
+  streak: number;
+}
+
+function emptyHistory(): ClaimHistory {
+  return { claimedCards: new Array(14).fill(0), passedCards: new Array(14).fill(0), streakRank: -1, streak: 0 };
+}
+
 export function isSpadeThree(card: Card): boolean {
   return !card.isJoker && card.suit === 'spade' && card.number === 3;
 }
@@ -105,6 +120,10 @@ export class BrainMemory {
   private pendingBucket: number | null = null;
   /** 相手ごとの「持っていると分かっているカード」ランク別期待枚数 */
   knownHeld = new Map<string, number[]>();
+  /** プレイヤーごとの宣言履歴 */
+  histories = new Map<string, ClaimHistory>();
+  /** これまでの宣言の総数 */
+  totalClaims = 0;
   profiles = new Map<string, OpponentProfile>();
 
   /** 個性 (CPU ごとに少しだけ判断基準をずらす) */
@@ -123,6 +142,15 @@ export class BrainMemory {
       this.profiles.set(playerId, profile);
     }
     return profile;
+  }
+
+  history(playerId: string): ClaimHistory {
+    let history = this.histories.get(playerId);
+    if (!history) {
+      history = emptyHistory();
+      this.histories.set(playerId, history);
+    }
+    return history;
   }
 
   held(playerId: string): number[] {
@@ -199,6 +227,16 @@ export class BrainMemory {
         const count = log.cardCount ?? 0;
         this.pending = { logId: log.id, playerId: log.playerId, rank, count, lieProbability: null };
         this.profile(log.playerId).claims++;
+        this.totalClaims++;
+        {
+          const history = this.history(log.playerId);
+          history.claimedCards[rank] += count;
+          if (history.streakRank === rank) history.streak++;
+          else {
+            history.streakRank = rank;
+            history.streak = 1;
+          }
+        }
         {
           const claimant = view.seats.find(seat => seat.id === log.playerId);
           const remaining = publicRemaining(countRanks(view.faceUp), this.publicClaimed);
@@ -333,6 +371,7 @@ export class BrainMemory {
     this.pending = null;
 
     this.publicClaimed[claim.rank] += claim.count;
+    this.history(claim.playerId).passedCards[claim.rank] += claim.count;
 
     if (claim.playerId === view.myId) {
       // まだ手札に残っているカードは「出していない」ので数えない (不正な手が弾かれた場合の保険)

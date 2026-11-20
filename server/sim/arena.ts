@@ -10,21 +10,9 @@
  * --check   毎ステップ、カード54枚の保存則を検査する
  */
 import { runGame, Policy, GameResult } from './driver';
-import { legacyPolicy, randomPolicy, sneakyPolicy } from './policies';
+import { loadPolicy } from './registry';
 
 const realLog = console.log.bind(console);
-
-function loadPolicy(name: string): Policy {
-  if (name === 'legacy') return legacyPolicy;
-  if (name === 'random') return randomPolicy;
-  if (name === 'sneaky') return sneakyPolicy;
-  if (name === 'brain' || name.startsWith('brain:')) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { createBrainPolicy } = require('./brainPolicy');
-    return createBrainPolicy(name);
-  }
-  throw new Error(`unknown policy: ${name}`);
-}
 
 function parseArgs(argv: string[]): Record<string, string> {
   const args: Record<string, string> = {};

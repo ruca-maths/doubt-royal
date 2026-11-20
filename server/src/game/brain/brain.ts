@@ -21,6 +21,8 @@ import { Card, PendingEffect, Player, Room } from '../types';
 import { BrainMemory, isSpadeThree, plausibilityBucket, publicPossibility, publicRemaining } from './memory';
 import { BrainParams, DEFAULT_PARAMS } from './params';
 import { clamp, hyperPmf, hyperTail, sigmoid, sum } from './prob';
+import { DoubtAnalysis, doubtFeatures } from './doubtFeatures';
+import { LearnedDoubt } from './learnedDoubt';
 import { EvalContext, handValue, isForbiddenFinish, pickRemovals, removeCounts, turnsToFinish } from './evaluate';
 import {
   JOKER, RANKS, PlayerView, SeatView, buildView, copiesInDeck, countRanks, nextActiveSeat, rankOf, strengthOf,
@@ -379,6 +381,8 @@ export interface DoubtProbe {
   /** ダウトの損益分岐点 */
   threshold: number;
   decided: boolean;
+  /** 学習済みモデルで見積もったか */
+  learned: boolean;
 }
 
 export class Brain {
@@ -631,11 +635,20 @@ export class Brain {
 
   // ---------------------------------------------------------------- ダウト
 
-  static shouldDoubt(room: Room, player: Player, params: BrainParams = DEFAULT_PARAMS): boolean {
+  /**
+   * ダウト判断の材料をそろえる (判断そのものはしない)。
+   * 学習データの生成 (sim/gen-doubt-data.ts) からも、同じ特徴量を作るために呼ばれる。
+   * 自分の宣言を見ている / 場が空 などでダウトできないときは null。
+   */
+  static analyzeDoubt(
+    room: Room,
+    player: Player,
+    params: BrainParams = DEFAULT_PARAMS,
+  ): { analysis: DoubtAnalysis; features: Float32Array; mem: BrainMemory } | null {
     const view = buildView(room, player.id);
-    if (!view.fieldOwnerId || view.fieldOwnerId === view.myId || view.fieldCount === 0) return false;
+    if (!view.fieldOwnerId || view.fieldOwnerId === view.myId || view.fieldCount === 0) return null;
     const claimant = view.seats.find(seat => seat.id === view.fieldOwnerId);
-    if (!claimant) return false;
+    if (!claimant) return null;
 
     const mem = Brain.memoryFor(view);
     mem.sync(view);
@@ -656,22 +669,9 @@ export class Brain {
     const bucket = plausibilityBucket(hPublic);
     const base = baseLieRate(params, view, { rank, count, isCounter, finishing: finishingNow, wasLead, handBefore });
     const tendency = mem.lieTendency(claimant.id) * mem.lieFactor(bucket, params.expectedHit[bucket]) * mem.suspicion;
-    const pLie = lieProbability(base, tendency, h, hPublic, params);
-    mem.notePendingEstimate(pLie);
+    const heuristicLie = lieProbability(base, tendency, h, hPublic, params);
 
-    const report = (threshold: number, decided: boolean): boolean => {
-      Brain.probe?.({
-        playerId: view.myId, rank, count, isCounter, finishing: finishingNow, wasLead,
-        special: rank === 7 || rank === 8 || rank === 10 || (rank === 12 && view.bombActive),
-        possibility: h, publicPossibility: hPublic, lieProbability: pLie, threshold, decided,
-      });
-      return decided;
-    };
-
-    if (forbiddenFinish) return report(2, false);
-    if (h <= 0) return report(0, true); // 枚数が合わない: 証明可能な嘘
-
-    const tau = doubtThreshold(params, {
+    const threshold = forbiddenFinish ? 2 : doubtThreshold(params, {
       observerLives: view.lives,
       observerCards: view.hand.length,
       count,
@@ -681,7 +681,45 @@ export class Brain {
       activeCount: view.activeCount,
       effectStake: effectStake(params, view, rank, count, claimant.id, view.myId, c.my),
     });
-    return report(tau, Math.random() < sigmoid((pLie - tau) / params.doubtSoftness));
+
+    const analysis: DoubtAnalysis = {
+      rank, count, isCounter, wasLead,
+      finishing: finishingNow, finishingByEffect, forbiddenFinish, handBefore,
+      possibility: h, publicPossibility: hPublic, heuristicLie, threshold,
+    };
+    const features = doubtFeatures({ view, mem, claimant, my: c.my, faceUp: c.faceUp, unknown: c.unknown, analysis });
+    return { analysis, features, mem };
+  }
+
+  static shouldDoubt(room: Room, player: Player, params: BrainParams = DEFAULT_PARAMS): boolean {
+    const result = Brain.analyzeDoubt(room, player, params);
+    if (!result) return false;
+    const { analysis: a, features, mem } = result;
+
+    // 学習済みモデルがあればそれで嘘確率を見積もる (無ければ手作りの見積もり)
+    const model = params.useLearnedDoubt ? LearnedDoubt.current() : null;
+    const pLie = a.possibility <= 0 ? 1 : model ? model.predict(features) : a.heuristicLie;
+    mem.notePendingEstimate(pLie);
+
+    const report = (decided: boolean): boolean => {
+      Brain.probe?.({
+        playerId: player.id, rank: a.rank, count: a.count, isCounter: a.isCounter, finishing: a.finishing, wasLead: a.wasLead,
+        special: a.rank === 7 || a.rank === 8 || a.rank === 10 || (a.rank === 12 && room.field.hasFieldCleared),
+        possibility: a.possibility, publicPossibility: a.publicPossibility, lieProbability: pLie,
+        threshold: a.threshold, decided, learned: !!model,
+      });
+      return decided;
+    };
+
+    if (a.forbiddenFinish) return report(false);
+    if (a.possibility <= 0) return report(true); // 枚数が合わない: 証明可能な嘘
+    return report(Math.random() < sigmoid((pLie - a.threshold) / params.doubtSoftness));
+  }
+
+  /** シミュレータ用: そのプレイヤーが実際に出したカードを記憶させる (Brain 以外の席でも数え上げを正しくする) */
+  static observeOwnPlay(room: Room, playerId: string, cards: Card[]): void {
+    const view = buildView(room, playerId);
+    Brain.memoryFor(view).noteMyPlay(cards);
   }
 
   // ---------------------------------------------------------------- カウンター

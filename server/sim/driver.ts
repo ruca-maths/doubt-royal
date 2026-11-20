@@ -8,6 +8,7 @@
 import { Room, Player, Card, PendingEffect } from '../src/game/types';
 import { GameEngine } from '../src/game/engine';
 import { DoubtManager } from '../src/game/doubt';
+import { Brain } from '../src/game/brain/brain';
 
 export interface PlayDecision {
   type: 'play' | 'pass';
@@ -66,6 +67,11 @@ export interface RunOptions {
   /** 各ステップでカード54枚の保存則を検査する (遅い) */
   checkInvariants?: boolean;
   maxSteps?: number;
+  /**
+   * ダウト受付のたびに、ダウトできる各プレイヤーについて (そのプレイヤーが判断する直前に) 呼ばれる。
+   * wasLie は場に出ているカードが実際に嘘かどうか (学習データのラベル)。
+   */
+  onDoubtWindow?: (room: Room, observer: Player, claimant: Player, wasLie: boolean, seatPolicy: string, claimantPolicy: string) => void;
 }
 
 export function createSimRoom(playerCount: number): Room {
@@ -194,8 +200,10 @@ export function runGame(policies: Policy[], options: RunOptions = {}): GameResul
       perSeat.get(actorId)!.lies++;
     }
 
+    const claimant = room.players.find(p => p.id === actorId)!;
     for (const p of room.players) {
       if (p.id === actorId || p.isOut || p.lives <= 0) continue;
+      options.onDoubtWindow?.(room, p, claimant, lying, policyOf.get(p.id)!.name, policyOf.get(actorId)!.name);
       if (policyOf.get(p.id)!.shouldDoubt(room, p)) {
         DoubtManager.registerDoubt(room, p.id);
       } else {
@@ -262,6 +270,7 @@ export function runGame(policies: Policy[], options: RunOptions = {}): GameResul
         stuck = `illegal play by ${policyOf.get(playerId)!.name}: ${result.error}`;
         break;
       }
+      Brain.observeOwnPlay(room, playerId, decision.cards!);
       stats.plays++;
       continue;
     }
@@ -282,6 +291,7 @@ export function runGame(policies: Policy[], options: RunOptions = {}): GameResul
       if (cards.length > 0) {
         const result = GameEngine.declareCounter(room, actorId, cards.map(c => c.id));
         if (result.success) {
+          Brain.observeOwnPlay(room, actorId, cards);
           stats.counters++;
           continue; // -> doubtPhase
         }
