@@ -1,7 +1,11 @@
 """
-嘘判定モデル (doubt model) の学習。
+学習済みモデルの学習 (2 種類)。
 
-    python train_doubt.py --data data/gen0 --out runs/gen0/doubt-model.json
+    python train_doubt.py --kind doubt --data data/gen0 --out runs/gen0/doubt-model.json
+    python train_doubt.py --kind risk  --data data/gen0 --out runs/gen0/risk-model.json
+
+  doubt : 相手の宣言が嘘である確率 (ダウトするかの判断に使う)
+  risk  : 自分の宣言が誰かにダウトされる確率 (どう出すか・嘘をつくかの判断に使う)
 
 入力: server/sim/gen-doubt-data.ts が書き出した .npy (X: 特徴量, y: 嘘なら 1, aux: 分析用の補助列)
 出力: server/src/game/brain/learnedDoubt.ts が読む JSON (多層パーセプトロンの重み + 入力の正規化値)
@@ -33,14 +37,19 @@ except ImportError:  # pragma: no cover
 
 # ----------------------------------------------------------------------------- データ
 
-def load_dataset(dirs: list[str], max_rows: int | None):
+def load_dataset(dirs: list[str], max_rows: int | None, kind: str = "doubt"):
     xs, ys, auxs, groups, claimant_names = [], [], [], [], []
     feature_names = None
     aux_names = None
     version = None
-    shard_dirs = sorted({os.path.dirname(p) for d in dirs for p in glob.glob(os.path.join(d, "**", "shard*_X.npy"), recursive=True)})
+    def dir_kind(shard_dir):
+        with open(os.path.join(shard_dir, "meta.json"), encoding="utf-8") as f:
+            return json.load(f).get("kind", "doubt")  # 最初の版のデータは kind を持たない (= doubt)
+
+    candidates = {os.path.dirname(p) for d in dirs for p in glob.glob(os.path.join(d, "**", "shard*_X.npy"), recursive=True)}
+    shard_dirs = sorted(d for d in candidates if dir_kind(d) == kind)
     if not shard_dirs:
-        raise SystemExit(f"no shards found under {dirs}")
+        raise SystemExit(f"no {kind} shards found under {dirs}")
 
     for dir_index, shard_dir in enumerate(shard_dirs):
         with open(os.path.join(shard_dir, "meta.json"), encoding="utf-8") as f:
@@ -242,6 +251,38 @@ def decision_edge(p: np.ndarray, y: np.ndarray, tau: np.ndarray) -> float:
     return float(np.mean(np.where(doubt, y - tau, 0.0)))
 
 
+def report_risk(p_model, p_heur, y, actor, honest):
+    lines = []
+    lines.append(f"{'':16}{'logloss':>9}{'AUC':>8}{'brier':>8}")
+    for name, p in (("model", p_model), ("heuristic", p_heur)):
+        lines.append(f"{name:16}{logloss(p, y):9.4f}{auc(p, y):8.4f}{float(np.mean((p - y) ** 2)):8.4f}")
+    lines.append("")
+    lines.append("較正 (予測したダウトされる確率の帯 → 実際にダウトされた割合):")
+    bins = np.linspace(0, 1, 11)
+    for name, p in (("model", p_model), ("heuristic", p_heur)):
+        idx = np.clip(np.digitize(p, bins) - 1, 0, 9)
+        parts = []
+        for b in range(10):
+            m = idx == b
+            if m.sum() >= 50:
+                parts.append(f"{p[m].mean():.2f}→{y[m].mean():.2f}")
+        lines.append(f"  {name:10} " + " ".join(parts))
+    lines.append("")
+    lines.append("宣言した打ち手ごと (実際にダウトされた割合 / 予測の平均。正直な宣言と嘘の宣言に分けて):")
+    lines.append(f"  {'actor':16}{'n':>8}{'honest:real':>13}{'model':>8}{'heur':>8}{'lie:real':>11}{'model':>8}{'heur':>8}")
+    for name in sorted(set(actor.tolist())):
+        m = actor == name
+        h = m & (honest == 1)
+        l = m & (honest == 0)
+        def mean(a, mask):
+            return float(a[mask].mean()) if mask.sum() else float("nan")
+        lines.append(
+            f"  {name:16}{m.sum():8d}{mean(y, h):13.3f}{mean(p_model, h):8.3f}{mean(p_heur, h):8.3f}"
+            f"{mean(y, l):11.3f}{mean(p_model, l):8.3f}{mean(p_heur, l):8.3f}"
+        )
+    return "\n".join(lines)
+
+
 def report(p_model, p_heur, y, tau, claimant, possibility):
     lines = []
     lines.append(f"{'':16}{'logloss':>9}{'AUC':>8}{'edge':>9}")
@@ -276,7 +317,7 @@ def report(p_model, p_heur, y, tau, claimant, possibility):
 
 # ----------------------------------------------------------------------------- 書き出し
 
-def export_json(path, weights, mean, std, temperature, feature_names, version, meta):
+def export_json(path, weights, mean, std, temperature, feature_names, version, meta, kind="doubt"):
     """weights: [(W[出力×入力], b), ...]"""
     layers = []
     for i, (w, b) in enumerate(weights):
@@ -287,6 +328,7 @@ def export_json(path, weights, mean, std, temperature, feature_names, version, m
         layers.append({"w": np.round(w, 6).tolist(), "b": np.round(b, 6).tolist()})
     data = {
         "format": "doubt-mlp",
+        "kind": kind,
         "featureVersion": version,
         "featureNames": feature_names,
         "mean": np.round(mean.astype(np.float64), 6).tolist(),
@@ -303,6 +345,7 @@ def export_json(path, weights, mean, std, temperature, feature_names, version, m
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--kind", choices=["doubt", "risk"], default="doubt", help="学習するモデルの種類")
     ap.add_argument("--data", nargs="+", required=True, help="学習データのディレクトリ (複数可。下の階層も探す)")
     ap.add_argument("--out", required=True, help="書き出すモデル JSON")
     ap.add_argument("--hidden", nargs="+", type=int, default=[256, 128])
@@ -327,7 +370,7 @@ def main():
         device = "numpy"
 
     t0 = time.time()
-    x, y, aux, group, claimant, feature_names, aux_names, version, shard_dirs = load_dataset(args.data, args.max_rows)
+    x, y, aux, group, claimant, feature_names, aux_names, version, shard_dirs = load_dataset(args.data, args.max_rows, args.kind)
     print(f"loaded {len(y):,} rows x {x.shape[1]} features from {len(shard_dirs)} dir(s) in {time.time() - t0:.1f}s; lie rate {y.mean():.3f}; device {device}")
 
     train, val = split_by_game(group, args.val)
@@ -345,20 +388,24 @@ def main():
 
     col = {name: i for i, name in enumerate(aux_names)}
     aux_v = aux[val]
-    text = report(
-        p_model,
-        aux_v[:, col["heuristic_lie"]],
-        y[val],
-        aux_v[:, col["threshold"]],
-        claimant[val],
-        aux_v[:, col["possibility"]],
-    )
+    if args.kind == "risk":
+        text = report_risk(p_model, aux_v[:, col["heuristic"]], y[val], claimant[val], aux_v[:, col["honest"]])
+    else:
+        text = report(
+            p_model,
+            aux_v[:, col["heuristic_lie"]],
+            y[val],
+            aux_v[:, col["threshold"]],
+            claimant[val],
+            aux_v[:, col["possibility"]],
+        )
     print()
     print(text)
 
     name = args.name or os.path.splitext(os.path.basename(args.out))[0]
     meta = {
         "name": name,
+        "kind": args.kind,
         "trainedAt": datetime.now(timezone.utc).isoformat(),
         "rows": int(len(y)),
         "valRows": int(val.sum()),
@@ -368,7 +415,7 @@ def main():
         "hidden": args.hidden,
         "data": [os.path.relpath(d) for d in shard_dirs],
     }
-    export_json(args.out, weights, mean, std, temperature, feature_names, version, meta)
+    export_json(args.out, weights, mean, std, temperature, feature_names, version, meta, args.kind)
     with open(os.path.splitext(args.out)[0] + "-report.txt", "w", encoding="utf-8") as f:
         f.write(json.dumps(meta, ensure_ascii=False, indent=2) + "\n\n" + text + "\n")
     print(f"\nwrote {args.out}")

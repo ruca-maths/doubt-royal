@@ -22,7 +22,8 @@ import { BrainMemory, isSpadeThree, plausibilityBucket, publicPossibility, publi
 import { BrainParams, DEFAULT_PARAMS } from './params';
 import { clamp, hyperPmf, hyperTail, sigmoid, sum } from './prob';
 import { DoubtAnalysis, doubtFeatures } from './doubtFeatures';
-import { LearnedDoubt } from './learnedDoubt';
+import { LearnedDoubt, LearnedRisk } from './learnedDoubt';
+import { riskFeatures } from './riskFeatures';
 import { EvalContext, handValue, isForbiddenFinish, pickRemovals, removeCounts, turnsToFinish } from './evaluate';
 import {
   JOKER, RANKS, PlayerView, SeatView, buildView, copiesInDeck, countRanks, nextActiveSeat, rankOf, strengthOf,
@@ -294,6 +295,45 @@ function doubtRisk(params: BrainParams, view: PlayerView, mem: BrainMemory, c: C
   return clamp(0.5 * modelled + 0.5 * observed, 0, 0.99);
 }
 
+/**
+ * 自分の宣言が誰かにダウトされる確率 q。
+ * 学習済みのダウト予測モデル (models/risk-model.json) があればそれを使い、無ければ手作りの見積もり。
+ */
+function claimRisk(
+  params: BrainParams,
+  view: PlayerView,
+  mem: BrainMemory,
+  c: Counting,
+  claim: MyClaim,
+  honest: boolean,
+  withFeatures = false,
+): { q: number; heuristic: number; features: Float32Array | null } {
+  const heuristic = doubtRisk(params, view, mem, c, claim);
+  if (claim.forbiddenFinish || view.opponents.length === 0) return { q: 0, heuristic, features: null };
+  const model = params.useLearnedRisk ? (params.riskModel ?? LearnedRisk.current()) : null;
+  if (!model && !withFeatures) return { q: heuristic, heuristic, features: null };
+  const remaining = publicRemaining(c.faceUp, mem.publicClaimed);
+  const features = riskFeatures({
+    view,
+    mem,
+    my: c.my,
+    faceUp: c.faceUp,
+    claim: {
+      rank: claim.rank,
+      count: claim.count,
+      isCounter: claim.isCounter,
+      wasLead: claim.wasLead,
+      finishing: claim.finishing,
+      forbiddenFinish: claim.forbiddenFinish,
+      handBefore: claim.handBefore,
+      honest,
+      publicPossibility: publicPossibility(remaining, claim.rank, claim.count, claim.handBefore, claim.isCounter && claim.rank === 3),
+      heuristicRisk: heuristic,
+    },
+  });
+  return { q: model ? model.predict(features) : heuristic, heuristic, features };
+}
+
 // ===== Qボンバーの指定 =====
 
 function chooseBomb(
@@ -501,9 +541,9 @@ export class Brain {
       const finishing = rest.length === 0;
       const forbidden = finishing && isForbiddenFinish(rank, revolutionAfter);
 
-      const q = doubtRisk(params, view, mem, c, {
+      const q = claimRisk(params, view, mem, c, {
         rank, count, isCounter: false, finishing, wasLead: isLead, handBefore: hand.length, forbiddenFinish: forbidden,
-      });
+      }, honest).q;
 
       let accepted: number;
       if (forbidden) accepted = -params.forbiddenPenalty;
@@ -697,7 +737,7 @@ export class Brain {
     const { analysis: a, features, mem } = result;
 
     // 学習済みモデルがあればそれで嘘確率を見積もる (無ければ手作りの見積もり)
-    const model = params.useLearnedDoubt ? LearnedDoubt.current() : null;
+    const model = params.useLearnedDoubt ? (params.doubtModel ?? LearnedDoubt.current()) : null;
     const pLie = a.possibility <= 0 ? 1 : model ? model.predict(features) : a.heuristicLie;
     mem.notePendingEstimate(pLie);
 
@@ -714,6 +754,46 @@ export class Brain {
     if (a.forbiddenFinish) return report(false);
     if (a.possibility <= 0) return report(true); // 枚数が合わない: 証明可能な嘘
     return report(Math.random() < sigmoid((pLie - a.threshold) / params.doubtSoftness));
+  }
+
+  /**
+   * 学習データ用: これから出す宣言について、ダウト予測モデルの特徴量と手作りの見積もりを返す。
+   * プレイ (またはカウンター) を盤面に反映する前に呼ぶこと。
+   */
+  static riskSample(
+    room: Room,
+    player: Player,
+    cards: Card[],
+    declared: number,
+    isCounter: boolean,
+    params: BrainParams = DEFAULT_PARAMS,
+  ): { features: Float32Array; heuristic: number; honest: boolean } | null {
+    const view = buildView(room, player.id);
+    if (view.opponents.length === 0 || cards.length === 0) return null;
+    const mem = Brain.memoryFor(view);
+    mem.sync(view);
+    const c = buildCounting(view, mem);
+    const finishing = cards.length === view.hand.length;
+    const revolutionAfter = !isCounter && cards.length >= 4 ? !view.isRevolution : view.isRevolution;
+    const forbiddenFinish = finishing && !isCounter && isForbiddenFinish(declared, revolutionAfter);
+    const honest = isCounter && declared === 3
+      ? cards.length === 1 && isSpadeThree(cards[0])
+      : declared === JOKER
+        ? cards.every(card => card.isJoker)
+        : cards.every(card => card.isJoker || card.number === declared);
+    const claim: MyClaim = {
+      rank: declared,
+      count: cards.length,
+      isCounter,
+      finishing,
+      wasLead: !isCounter && view.fieldCount === 0,
+      handBefore: view.hand.length,
+      forbiddenFinish,
+      holdsSpadeThree: isCounter && declared === 3 ? honest : undefined,
+    };
+    const risk = claimRisk({ ...params, useLearnedRisk: false }, view, mem, c, claim, honest, true);
+    if (!risk.features) return null; // 禁止上がりなど、誰もダウトしない宣言は学習に使わない
+    return { features: risk.features, heuristic: risk.heuristic, honest };
   }
 
   /** シミュレータ用: そのプレイヤーが実際に出したカードを記憶させる (Brain 以外の席でも数え上げを正しくする) */
@@ -774,7 +854,7 @@ export class Brain {
     const junk = pickRemovals(hand, need, ctx, params, { exact: true, keepJokers: true });
     if (junk.length !== need) return [];
     const finishing = need === hand.length;
-    const q = doubtRisk(params, view, mem, c, {
+    const q = claimRisk(params, view, mem, c, {
       rank: againstEight ? 4 : 3,
       count: need,
       isCounter: true,
@@ -783,7 +863,7 @@ export class Brain {
       handBefore: hand.length,
       forbiddenFinish: false,
       holdsSpadeThree: false,
-    });
+    }, false).q;
     const averageOpponentHand = sum(view.opponents.map(o => o.cardCount)) / Math.max(1, view.opponents.length);
     const received = Math.min(need, Math.max(1, averageOpponentHand));
     const afterCounts = removeCounts(c.my, junk);

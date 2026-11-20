@@ -5,13 +5,16 @@
 import { Brain } from '../src/game/brain/brain';
 import { BrainParams, DEFAULT_PARAMS } from '../src/game/brain/params';
 import { Policy } from './driver';
+import { LearnedDoubt, LearnedRisk } from '../src/game/brain/learnedDoubt';
 
 /** 調整実験用のパラメータ差分。例: --seats brain,brain:timid,legacy,legacy */
 export const variants: Record<string, Partial<BrainParams>> = {
   // 嘘をほとんどつかない
   timid: { bluffMargin: 5 },
   // 学習済みモデルを使わず、手作りの嘘判定だけで打つ
-  heuristic: { useLearnedDoubt: false },
+  heuristic: { useLearnedDoubt: false, useLearnedRisk: false },
+  // ダウト予測モデルだけ使わない (出し方は手作りの見積もり)
+  norisk: { useLearnedRisk: false },
   // 嘘を多めにつく
   bold: { bluffMargin: -0.4 },
   // ダウトをほとんどしない
@@ -23,6 +26,11 @@ export function createBrainPolicy(name: string, overrides?: Partial<BrainParams>
   let fromEnv: Partial<BrainParams> = {};
   if (variant === 'env' && process.env.BRAIN_PARAMS) {
     fromEnv = JSON.parse(process.env.BRAIN_PARAMS);
+  }
+  // brain:prev = 環境変数 PREV_DOUBT_MODEL / PREV_RISK_MODEL のモデルで打つ (新旧のモデルの直接対決用)
+  if (variant === 'prev') {
+    if (process.env.PREV_DOUBT_MODEL) fromEnv.doubtModel = LearnedDoubt.loadFile(process.env.PREV_DOUBT_MODEL);
+    if (process.env.PREV_RISK_MODEL) fromEnv.riskModel = LearnedRisk.loadFile(process.env.PREV_RISK_MODEL);
   }
   const params: BrainParams = { ...DEFAULT_PARAMS, ...(variants[variant] ?? {}), ...fromEnv, ...overrides };
   return {

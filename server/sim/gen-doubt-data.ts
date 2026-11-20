@@ -4,10 +4,11 @@
  *   npx ts-node -T sim/gen-doubt-data.ts --games 20000 --out ../learn/data/gen0/w0
  *   (Colab ではコンパイル済みの node dist-sim/sim/gen-doubt-data.js を並列に起動する)
  *
- * ダウト受付が開くたびに、ダウトできる全員について
- *   X: その人から見た特徴量 (src/game/brain/doubtFeatures.ts)
- *   y: 場に出ているカードが本当に嘘だったか (0/1)
- * を 1 行ずつ記録し、numpy の .npy 形式で書き出す。
+ * 2 種類のデータを numpy の .npy 形式で書き出す。
+ *   <out>/doubt/ : ダウト受付が開くたびに、ダウトできる全員について
+ *                  X = その人から見た特徴量 (src/game/brain/doubtFeatures.ts)、y = 本当に嘘だったか
+ *   <out>/risk/  : 宣言のたびに、宣言した本人について
+ *                  X = 本人から見た特徴量 (src/game/brain/riskFeatures.ts)、y = 誰かにダウトされたか
  *
  * 卓のメンバーは「リーグ」から毎局ランダムに選ぶ。素直な打ち手だけでなく、同じ嘘を
  * 繰り返す搾取型 (sim/exploiters.ts) も混ぜておくことで、モデルが
@@ -27,7 +28,8 @@ import { runGame } from './driver';
 import { loadPolicy } from './registry';
 import { Brain } from '../src/game/brain/brain';
 import { DOUBT_FEATURE_DIM, DOUBT_FEATURE_NAMES, DOUBT_FEATURE_VERSION } from '../src/game/brain/doubtFeatures';
-import { LearnedDoubt } from '../src/game/brain/learnedDoubt';
+import { RISK_FEATURE_DIM, RISK_FEATURE_NAMES, RISK_FEATURE_VERSION } from '../src/game/brain/riskFeatures';
+import { LearnedDoubt, LearnedRisk } from '../src/game/brain/learnedDoubt';
 
 const realLog = console.log.bind(console);
 
@@ -70,7 +72,7 @@ const LEAGUES: Record<string, Record<string, number>> = {
 
 const PLAYER_COUNTS: Array<[number, number]> = [[2, 15], [3, 20], [4, 35], [5, 15], [6, 15]];
 
-/** 補助列 (学習には使わず、評価・分析に使う) */
+/** 補助列 (学習には使わず、評価・分析に使う) — 嘘判定データ */
 const AUX_NAMES = [
   'game',            // 対局番号 (検証データを対局単位で分けるため)
   'claimant_policy', // 宣言した人の打ち手 (POLICY_IDS の番号)
@@ -81,6 +83,18 @@ const AUX_NAMES = [
   'players',         // 卓の人数
   'count',           // 宣言枚数
   'rank',            // 宣言ランク
+];
+
+/** 補助列 — ダウト予測データ */
+const RISK_AUX_NAMES = [
+  'game',            // 対局番号
+  'claimant_policy', // 宣言した人の打ち手 (評価スクリプトと列名をそろえる)
+  'heuristic',       // 手作りのダウト予測
+  'honest',          // 正直な宣言だったか
+  'lie',             // 嘘だったか (= 1 - honest。評価用)
+  'players',
+  'count',
+  'rank',
 ];
 
 function weightedPick<T>(entries: Array<[T, number]>): T {
@@ -129,17 +143,22 @@ class ShardWriter {
   private shard = 0;
   total = 0;
 
-  constructor(private readonly dir: string, private readonly capacity: number) {
-    this.x = new Float32Array(capacity * DOUBT_FEATURE_DIM);
+  constructor(
+    private readonly dir: string,
+    private readonly capacity: number,
+    private readonly dim: number,
+    private readonly auxNames: string[],
+  ) {
+    this.x = new Float32Array(capacity * dim);
     this.y = new Uint8Array(capacity);
-    this.aux = new Float32Array(capacity * AUX_NAMES.length);
+    this.aux = new Float32Array(capacity * auxNames.length);
     fs.mkdirSync(dir, { recursive: true });
   }
 
   add(features: Float32Array, label: number, aux: number[]): void {
-    this.x.set(features, this.rows * DOUBT_FEATURE_DIM);
+    this.x.set(features, this.rows * this.dim);
     this.y[this.rows] = label;
-    this.aux.set(aux, this.rows * AUX_NAMES.length);
+    this.aux.set(aux, this.rows * this.auxNames.length);
     this.rows++;
     this.total++;
     if (this.rows === this.capacity) this.flush();
@@ -148,9 +167,9 @@ class ShardWriter {
   flush(): void {
     if (this.rows === 0) return;
     const name = `shard${String(this.shard).padStart(3, '0')}`;
-    writeNpy(path.join(this.dir, `${name}_X.npy`), this.x.subarray(0, this.rows * DOUBT_FEATURE_DIM), [this.rows, DOUBT_FEATURE_DIM]);
+    writeNpy(path.join(this.dir, `${name}_X.npy`), this.x.subarray(0, this.rows * this.dim), [this.rows, this.dim]);
     writeNpy(path.join(this.dir, `${name}_y.npy`), this.y.subarray(0, this.rows), [this.rows]);
-    writeNpy(path.join(this.dir, `${name}_aux.npy`), this.aux.subarray(0, this.rows * AUX_NAMES.length), [this.rows, AUX_NAMES.length]);
+    writeNpy(path.join(this.dir, `${name}_aux.npy`), this.aux.subarray(0, this.rows * this.auxNames.length), [this.rows, this.auxNames.length]);
     this.shard++;
     this.rows = 0;
   }
@@ -166,9 +185,15 @@ function main(): void {
   if (!league) throw new Error(`unknown league: ${leagueName} (${Object.keys(LEAGUES).join(', ')})`);
   const gameOffset = parseInt(args['game-offset'] || '0', 10);
 
-  if (args['no-model'] === 'true') LearnedDoubt.set(null);
-  else if (args.model) LearnedDoubt.set(LearnedDoubt.loadFile(path.resolve(args.model)));
+  if (args['no-model'] === 'true') {
+    LearnedDoubt.set(null);
+    LearnedRisk.set(null);
+  } else {
+    if (args.model) LearnedDoubt.set(LearnedDoubt.loadFile(path.resolve(args.model)));
+    if (args['risk-model']) LearnedRisk.set(LearnedRisk.loadFile(path.resolve(args['risk-model'])));
+  }
   const model = LearnedDoubt.current();
+  const riskModel = LearnedRisk.current();
 
   const policyNames = Object.keys(league);
   const policyIds = new Map(policyNames.map((name, i) => [name, i]));
@@ -178,7 +203,9 @@ function main(): void {
   console.log = () => {};
   console.warn = () => {};
 
-  const writer = new ShardWriter(outDir, shardSize);
+  const writer = new ShardWriter(path.join(outDir, 'doubt'), shardSize, DOUBT_FEATURE_DIM, AUX_NAMES);
+  const riskWriter = new ShardWriter(path.join(outDir, 'risk'), shardSize, RISK_FEATURE_DIM, RISK_AUX_NAMES);
+  let riskDoubted = 0;
   const started = Date.now();
   let stuck = 0;
   let lies = 0;
@@ -187,7 +214,23 @@ function main(): void {
     const players = weightedPick(PLAYER_COUNTS);
     const seats = Array.from({ length: players }, () => weightedPick(entries));
     const gameId = gameOffset + g;
+    let pendingRisk: { features: Float32Array; aux: number[] } | null = null;
     const result = runGame(seats.map(name => policies.get(name)!), {
+      onClaim(room, actor, cards, declared, isCounter, actorPolicy) {
+        const sample = Brain.riskSample(room, actor, cards, declared, isCounter);
+        pendingRisk = sample
+          ? {
+              features: sample.features,
+              aux: [gameId, policyIds.get(actorPolicy) ?? -1, sample.heuristic, sample.honest ? 1 : 0, sample.honest ? 0 : 1, players, cards.length, declared],
+            }
+          : null;
+      },
+      onDoubtResolved(_room, doubted) {
+        if (!pendingRisk) return;
+        riskWriter.add(pendingRisk.features, doubted ? 1 : 0, pendingRisk.aux);
+        if (doubted) riskDoubted++;
+        pendingRisk = null;
+      },
       onDoubtWindow(room, observer, _claimant, wasLie, seatPolicy, claimantPolicy) {
         const sample = Brain.analyzeDoubt(room, observer);
         if (!sample) return;
@@ -212,8 +255,27 @@ function main(): void {
     }
   }
   writer.flush();
+  riskWriter.flush();
+
+  const riskMeta = {
+    kind: 'risk',
+    featureVersion: RISK_FEATURE_VERSION,
+    featureNames: RISK_FEATURE_NAMES,
+    auxNames: RISK_AUX_NAMES,
+    policies: policyNames,
+    league: leagueName,
+    games,
+    gameOffset,
+    rows: riskWriter.total,
+    doubtedRate: riskWriter.total > 0 ? riskDoubted / riskWriter.total : 0,
+    usedModel: model ? (model.meta.name ?? 'doubt-model.json') : null,
+    usedRiskModel: riskModel ? (riskModel.meta.name ?? 'risk-model.json') : null,
+    createdAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(path.join(outDir, 'risk', 'meta.json'), JSON.stringify(riskMeta, null, 2));
 
   const meta = {
+    kind: 'doubt',
     featureVersion: DOUBT_FEATURE_VERSION,
     featureNames: DOUBT_FEATURE_NAMES,
     auxNames: AUX_NAMES,
@@ -228,10 +290,10 @@ function main(): void {
     usedModel: model ? (model.meta.name ?? 'doubt-model.json') : null,
     createdAt: new Date().toISOString(),
   };
-  fs.writeFileSync(path.join(outDir, 'meta.json'), JSON.stringify(meta, null, 2));
+  fs.writeFileSync(path.join(outDir, 'doubt', 'meta.json'), JSON.stringify(meta, null, 2));
   realLog(
     `wrote ${writer.total} rows from ${games} games to ${outDir} ` +
-    `(lie rate ${(100 * meta.lieRate).toFixed(1)}%, ${((Date.now() - started) / 1000).toFixed(0)}s, stuck ${stuck}, model ${meta.usedModel ?? 'none'})`
+    `+ ${riskWriter.total} risk rows (lie rate ${(100 * meta.lieRate).toFixed(1)}%, doubted ${(100 * riskMeta.doubtedRate).toFixed(1)}%, ${((Date.now() - started) / 1000).toFixed(0)}s, stuck ${stuck}, model ${meta.usedModel ?? 'none'} / ${riskMeta.usedRiskModel ?? 'none'})`
   );
 }
 

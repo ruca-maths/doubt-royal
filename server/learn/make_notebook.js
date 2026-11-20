@@ -12,15 +12,18 @@ function lines(text) {
 
 const cells = [
   md(`
-# DOUBT ROYALE — 嘘判定 (ダウト) モデルの学習
+# DOUBT ROYALE — CPU の学習 (嘘判定 / ダウト予測)
 
-このノートブックは、CPU が「相手の宣言が嘘かどうか」を見積もるモデルを自己対戦で学習します。
+このノートブックは、CPU が使う 2 つのモデルを自己対戦で学習します。
+- **嘘判定 (doubt)**: 相手の宣言が嘘である確率 → ダウトするかの判断に使う
+- **ダウト予測 (risk)**: 自分の宣言が誰かにダウトされる確率 → どう出すか・嘘をつくかの判断に使う
+
 設計の全体像は \`server/learn/README.md\` を参照してください。
 
 流れ (1 世代 = 下の 3 ステップ):
 1. **データ生成** — リポジトリのゲームエンジン (TypeScript) で自己対戦し、ダウトできる場面ごとに
    「観察者から見た特徴量」と「本当に嘘だったか」を記録する (Node.js を CPU で並列実行)
-2. **学習** — PyTorch で多層パーセプトロンを学習し、\`doubt-model.json\` を書き出す (GPU があれば使う)
+2. **学習** — PyTorch で 2 つの多層パーセプトロンを学習し、\`doubt-model.json\` と \`risk-model.json\` を書き出す
 3. **評価** — 学習したモデルを CPU に持たせて、搾取型ボット (8切り連打など) と対戦させる
 
 2 世代目以降は、前の世代のモデルを使う CPU 同士で対戦したデータも混ぜて学習し直します
@@ -35,6 +38,7 @@ const cells = [
 REPO_URL = "https://github.com/ruca-maths/doubt-royal.git"
 BRANCH = "main"
 GENERATIONS = 3            # 何世代くり返すか
+FROM_SCRATCH = False       # True: モデルなしの第 0 世代から / False: リポジトリにあるモデルから続ける
 GAMES_PER_WORKER = 6000    # 1 プロセスあたりの対局数 (1 対局 ≈ 55 行)
 EVAL_GAMES = 2000          # 評価の対局数
 SAVE_TO_DRIVE = False      # True にすると Google ドライブにも保存する
@@ -98,7 +102,9 @@ if SAVE_TO_DRIVE:
 `),
   code(`
 WORKERS = max(1, os.cpu_count() or 1)
-MODEL_PATH = f"{SERVER}/models/doubt-model.json"   # ここに置いたモデルを CPU (brain) が使う
+KINDS = ["doubt", "risk"]
+# ここに置いたモデルを CPU (brain) が使う
+MODEL_PATHS = {kind: f"{SERVER}/models/{kind}-model.json" for kind in KINDS}
 
 def generate(gen, league="default", games=GAMES_PER_WORKER, use_model=True):
     out = f"{LEARN}/data/gen{gen}"
@@ -118,47 +124,56 @@ def generate(gen, league="default", games=GAMES_PER_WORKER, use_model=True):
 
 def train(gen, extra_args=""):
     # 直近 2 世代ぶんのデータで学習する (古すぎる相手の癖に引きずられないように)
-    dirs = " ".join(f"{LEARN}/data/gen{g}" for g in range(max(0, gen - 1), gen + 1))
-    out = f"{LEARN}/runs/gen{gen}/doubt-model.json"
-    r = subprocess.run(f"python train_doubt.py --data {dirs} --out {out} --name doubt-gen{gen} {extra_args}",
-                       shell=True, cwd=LEARN, text=True)
-    if r.returncode != 0:
-        raise RuntimeError("training failed")
-    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-    shutil.copy(out, MODEL_PATH)
-    if SAVE_TO_DRIVE:
-        shutil.copy(out, f"{DRIVE_DIR}/doubt-model-gen{gen}.json")
-    return out
+    dirs = " ".join(f"{LEARN}/data/gen{g}" for g in range(max(0, gen - 1), gen + 1) if os.path.exists(f"{LEARN}/data/gen{g}"))
+    for kind in KINDS:
+        out = f"{LEARN}/runs/gen{gen}/{kind}-model.json"
+        r = subprocess.run(f"python train_doubt.py --kind {kind} --data {dirs} --out {out} --name {kind}-gen{gen} {extra_args}",
+                           shell=True, cwd=LEARN, text=True)
+        if r.returncode != 0:
+            raise RuntimeError(f"training failed ({kind})")
+        os.makedirs(os.path.dirname(MODEL_PATHS[kind]), exist_ok=True)
+        shutil.copy(out, MODEL_PATHS[kind])
+        if SAVE_TO_DRIVE:
+            shutil.copy(out, f"{DRIVE_DIR}/{kind}-model-gen{gen}.json")
 
 def arena(seats, games=EVAL_GAMES):
     r = sh(f"node dist-sim/sim/arena.js --games {games} --seats {seats}", cwd=SERVER, check=False)
     return r.stdout
 
 def evaluate():
-    # brain = 学習モデルあり / brain:heuristic = 手作りの判定 (比較用)
-    for seats in ["brain,brain,brain,pro8", "brain:heuristic,brain:heuristic,brain:heuristic,pro8",
-                  "brain,pro8", "brain,brain,brain,pro10", "brain,brain,brain,liar",
-                  "brain,brain:heuristic,brain,brain:heuristic"]:
+    # brain = 両モデルあり / brain:norisk = ダウト予測なし / brain:heuristic = どちらも手作り (比較用)
+    for seats in ["brain,brain,brain,pro8", "brain,pro8", "brain,brain,brain,pro10",
+                  "brain,brain:norisk,brain,brain:norisk", "brain,brain:heuristic,brain,brain:heuristic",
+                  "brain,legacy,legacy,legacy"]:
         arena(seats)
 `),
   md(`
-## 3. 第 0 世代: 学習済みモデルなしでデータを作る
+## 3. 第 0 世代
 
-まだモデルが無いので、CPU は手作りの判定で打ちます。卓には搾取型ボット (8 切り連打など) も混ぜます。
+- \`FROM_SCRATCH = False\` (既定): リポジトリにある学習済みモデルを使う CPU でデータを作る (続きから強くする)
+- \`FROM_SCRATCH = True\`: モデルを消し、手作りの判定だけで打つ CPU でデータを作る (一から学習し直す)
+
+卓には搾取型ボット (8 切り連打など) も混ぜます。
 `),
   code(`
-if os.path.exists(MODEL_PATH):
-    os.remove(MODEL_PATH)   # 第 0 世代は手作りの判定だけで打たせる
-generate(0, "default", use_model=False)
-generate(0, "exploit", games=GAMES_PER_WORKER // 2, use_model=False)
+if FROM_SCRATCH:
+    for path in MODEL_PATHS.values():
+        if os.path.exists(path):
+            os.remove(path)
+print("using models:", [p for p in MODEL_PATHS.values() if os.path.exists(p)])
+generate(0, "default", use_model=not FROM_SCRATCH)
+generate(0, "exploit", games=GAMES_PER_WORKER // 2, use_model=not FROM_SCRATCH)
+generate(0, "self", games=GAMES_PER_WORKER // 2, use_model=not FROM_SCRATCH)
 train(0)
 evaluate()
 `),
   md(`
 ## 4. 第 1 世代以降: 学習済みモデルを使う CPU 同士でデータを作り直す
 
-モデルを持った CPU は嘘を見抜くようになるので、相手 (brain) の嘘のつき方も変わります。
-その新しい分布でデータを取り直して学習し直す、を繰り返します。
+嘘判定が強くなると嘘のつき方が変わり、ダウト予測が正確になると嘘のつき方がまた変わります。
+新しいモデルを持った CPU 同士でデータを取り直して、両方を学習し直す、を繰り返します。
+
+データ生成は、ダウト予測モデルを使う世代から 1 局あたり数倍遅くなります (候補手ごとに推論するため)。
 `),
   code(`
 for gen in range(1, GENERATIONS):
@@ -171,14 +186,18 @@ for gen in range(1, GENERATIONS):
   md(`
 ## 5. モデルを持ち帰る
 
-\`doubt-model.json\` をダウンロードして、リポジトリの \`server/models/doubt-model.json\` に置いてコミットしてください。
-サーバーは起動時にこのファイルを読み込み、CPU のダウト判断に使います (無ければ従来の判定のまま)。
+\`models.zip\` をダウンロードして展開し、\`doubt-model.json\` と \`risk-model.json\` を
+リポジトリの \`server/models/\` に置いてコミットしてください。
+サーバーは起動時にこれらを読み込みます (無いものは手作りの見積もりのまま)。
 `),
   code(`
 from google.colab import files
-report = sorted(glob.glob(f"{LEARN}/runs/gen*/doubt-model-report.txt"))[-1]
-print(open(report, encoding="utf-8").read())
-files.download(MODEL_PATH)
+for kind in KINDS:
+    report = sorted(glob.glob(f"{LEARN}/runs/gen*/{kind}-model-report.txt"))[-1]
+    print(f"===== {report}")
+    print(open(report, encoding="utf-8").read())
+shutil.make_archive("/content/models", "zip", f"{SERVER}/models")
+files.download("/content/models.zip")
 `),
 ];
 

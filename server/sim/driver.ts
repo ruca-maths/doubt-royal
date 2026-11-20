@@ -72,6 +72,10 @@ export interface RunOptions {
    * wasLie は場に出ているカードが実際に嘘かどうか (学習データのラベル)。
    */
   onDoubtWindow?: (room: Room, observer: Player, claimant: Player, wasLie: boolean, seatPolicy: string, claimantPolicy: string) => void;
+  /** 宣言 (プレイ / カウンター) が盤面に反映される直前に呼ばれる */
+  onClaim?: (room: Room, actor: Player, cards: Card[], declared: number, isCounter: boolean, actorPolicy: string) => void;
+  /** ダウト受付が締め切られたとき (誰かがダウトしたか / 嘘だったか) */
+  onDoubtResolved?: (room: Room, doubted: boolean, wasLie: boolean) => void;
 }
 
 export function createSimRoom(playerCount: number): Room {
@@ -211,6 +215,7 @@ export function runGame(policies: Policy[], options: RunOptions = {}): GameResul
       }
     }
 
+    options.onDoubtResolved?.(room, room.doubtDeclarers.length > 0, lying);
     const result = DoubtManager.resolveDoubt(room);
     if (result.type === 'success') {
       stats.doubts++;
@@ -265,6 +270,7 @@ export function runGame(policies: Policy[], options: RunOptions = {}): GameResul
         const card = player.hand[0];
         decision = { type: 'play', cards: [card], declaredNumber: card.isJoker ? 0 : card.number };
       }
+      options.onClaim?.(room, player, decision.cards!, decision.declaredNumber!, false, policyOf.get(playerId)!.name);
       const result = GameEngine.playCards(room, playerId, decision.cards!.map(c => c.id), decision.declaredNumber!);
       if (!result.success) {
         stuck = `illegal play by ${policyOf.get(playerId)!.name}: ${result.error}`;
@@ -289,6 +295,7 @@ export function runGame(policies: Policy[], options: RunOptions = {}): GameResul
       const actor = room.players.find(p => p.id === actorId)!;
       const cards = actor.isOut || actor.lives <= 0 ? [] : policyOf.get(actorId)!.chooseCounter(room, actor);
       if (cards.length > 0) {
+        options.onClaim?.(room, actor, cards, room.field.declaredNumber === 8 ? 4 : 3, true, policyOf.get(actorId)!.name);
         const result = GameEngine.declareCounter(room, actorId, cards.map(c => c.id));
         if (result.success) {
           Brain.observeOwnPlay(room, actorId, cards);

@@ -2,6 +2,8 @@
  * 思考ルーチンの調整パラメータ。
  * 値は自己対戦 (server/sim/arena.ts) で調整したもの。単位は基本的に「手番 1 回ぶんの価値」。
  */
+import type { MlpModel } from './learnedDoubt';
+
 export interface BrainParams {
   // ---- 手札評価 ----
   /** 手札1枚あたりの重さ (同じ手数なら枚数が少ないほうが良い) */
@@ -32,6 +34,11 @@ export interface BrainParams {
   opponentGainWeight: number;
   /** 行動選択のランダムさ (ソフトマックス温度)。0 に近いほど最善手だけを選ぶ */
   temperature: number;
+  /** 既定のファイルの代わりに使うモデル (シミュレータで新旧のモデルを対戦させるとき用) */
+  doubtModel?: MlpModel;
+  riskModel?: MlpModel;
+  /** server/models/risk-model.json (学習済みのダウト予測モデル) があれば使う */
+  useLearnedRisk: boolean;
   /** 嘘の手が正直な最善手をどれだけ上回れば採用するか */
   bluffMargin: number;
 
@@ -95,6 +102,7 @@ export const DEFAULT_PARAMS: BrainParams = {
   honestDoubtBonus: 0.4,
   opponentGainWeight: 1.0,
   temperature: 0.15,
+  useLearnedRisk: true,
   bluffMargin: 0.0,
 
   baseLeadPlain: [0.1, 0.09, 0.12],
