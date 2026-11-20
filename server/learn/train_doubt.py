@@ -76,8 +76,12 @@ def load_dataset(dirs: list[str], max_rows: int | None):
 
 def split_by_game(group: np.ndarray, val_fraction: float):
     # 対局番号のハッシュで決める (データを足しても同じ対局は同じ側に入る)
-    h = (group * 2654435761) % 1000
+    # (乗算ハッシュの上位ビットを使う。下位の桁は対局番号の並びに引きずられて偏るため)
+    x = (group.astype(np.uint64) * np.uint64(2654435761)) & np.uint64(0xFFFFFFFF)
+    h = (x * np.uint64(1000)) >> np.uint64(32)
     val = h < int(val_fraction * 1000)
+    if val.all() or not val.any():
+        raise SystemExit("対局数が少なすぎて学習用と検証用に分けられません (--games を増やしてください)")
     return ~val, val
 
 
